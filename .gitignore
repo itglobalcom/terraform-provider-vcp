@@ -1,0 +1,21 @@
+terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+
+*.env
+
+*.tfstate
+*.tfstate.*
+.terraform/
+*.terraform.lock.hcl
+
+# Go build artifacts
+/terraform-provider-vcp
+/bin/
+/dist/
+*.test
+*.out
+
+# Go workspace — local dev only, never commit (use go.work.example as template)
+go.work
+go.work.sum

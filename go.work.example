@@ -1,0 +1,20 @@
+// Template for local co-development against a local SDK checkout.
+// Not needed for a regular build — the published SDK from go.mod is used.
+//
+// Copy to go.work (which is gitignored — never commit it):
+//     make dev-setup
+// or manually:
+//     go work init .
+//     go work edit -replace github.com/itglobalcom/vstack-cloud-panel-sdk=../vstack-cloud-panel-sdk
+//
+// We use `replace` (not `use ../vstack-cloud-panel-sdk`) so the local checkout
+// is always used regardless of the version pinned in go.mod.
+//
+// With this workspace, edits in ../vstack-cloud-panel-sdk are picked up by the
+// provider immediately (go build / go test) — no `replace` in go.mod, nothing
+// committed. See CONTRIBUTING.md.
+go 1.25.12
+
+use .
+
+replace github.com/itglobalcom/vstack-cloud-panel-sdk => ../vstack-cloud-panel-sdk

@@ -1,0 +1,52 @@
+# golangci-lint configuration (schema v2).
+# The version is pinned in the Makefile (GOLANGCI_VERSION) and `make lint`
+# installs exactly that build into bin/, so local and CI results match.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - copyloopvar
+    - depguard
+    - durationcheck
+    - errcheck
+    - forcetypeassert
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - predeclared
+    - staticcheck
+    - unconvert
+    - unused
+    - usetesting
+
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            # sdk/v2 is an indirect dependency (via terraform-plugin-testing),
+            # so it is importable by accident. This provider is framework-only.
+            - pkg: github.com/hashicorp/terraform-plugin-sdk/v2
+              desc: Use terraform-plugin-framework; sdk/v2 only comes in via terraform-plugin-testing.
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - examples
+    rules:
+      # In tests an unchecked assertion is fine: it panics into a failed test
+      # with a stack trace. In provider code it would crash the plugin.
+      - path: _test\.go
+        linters:
+          - forcetypeassert
+
+formatters:
+  enable:
+    - gofmt

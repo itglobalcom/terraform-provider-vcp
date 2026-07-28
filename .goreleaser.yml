@@ -1,0 +1,74 @@
+# Terraform Registry release configuration, based on
+# https://github.com/hashicorp/terraform-provider-scaffolding-framework
+version: 2
+
+# The repo directory name differs from the provider name, so set it explicitly:
+# release artifacts must be named terraform-provider-vcp_*.
+project_name: terraform-provider-vcp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      # goreleaser does not work with CGO; it could also complicate usage by
+      # users in CI/CD systems like Terraform Cloud where they are unable to
+      # install libraries.
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{.Version}}'
+    goos:
+      - freebsd
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - '386'
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: '386'
+      - goos: windows
+        goarch: arm
+    binary: '{{ .ProjectName }}_v{{ .Version }}'
+
+archives:
+  - formats: ['zip']
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+
+checksum:
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      # The gpg key is imported by the release workflow (GPG_FINGERPRINT env).
+      - '--batch'
+      - '--local-user'
+      - '{{ .Env.GPG_FINGERPRINT }}'
+      - '--output'
+      - '${signature}'
+      - '--detach-sign'
+      - '${artifact}'
+
+release:
+  extra_files:
+    - glob: 'terraform-registry-manifest.json'
+      name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
+
+# Release notes are GitHub's auto-generated ones (merged PRs / commits since
+# the previous tag). There is no CHANGELOG.md — the GitHub Releases page is
+# the changelog. For releases that need a human note (breaking changes, the
+# initial release), edit the release description after publishing.
+changelog:
+  use: github-native
