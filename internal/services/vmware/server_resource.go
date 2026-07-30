@@ -160,11 +160,16 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 	createReq := &entities.VmwareCreateServerRequest{
 		LocationID:       int(plan.LocationID.ValueInt64()),
 		Name:             plan.Name.ValueString(),
-		ComputerName:     plan.ComputerName.ValueString(),
 		ImageID:          int(plan.ImageID.ValueInt64()),
 		CPUCount:         int(plan.CPU.ValueInt64()),
 		RamMB:            int(plan.RamMB.ValueInt64()),
 		SystemDiskSizeMB: int(plan.SystemDiskMB.ValueInt64()),
+	}
+	// computer_name is Optional+Computed: send only when the user set it, otherwise
+	// let the platform derive it (avoid posting an empty hostname). It is read back
+	// (possibly normalised) into state afterwards.
+	if !plan.ComputerName.IsNull() && !plan.ComputerName.IsUnknown() {
+		createReq.ComputerName = plan.ComputerName.ValueString()
 	}
 	if !plan.SystemDiskType.IsNull() && !plan.SystemDiskType.IsUnknown() {
 		createReq.SystemDiskType = plan.SystemDiskType.ValueString()
