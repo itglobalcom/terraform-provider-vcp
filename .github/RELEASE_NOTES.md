@@ -1,11 +1,15 @@
 <!--
-Draft description for the v0.1.0 GitHub release. GitHub's auto-generated
-notes are useless for the very first tag (no previous tag to diff against),
-so paste this into the release description after goreleaser publishes it,
-then delete this file.
+Draft description for the next GitHub release. GitHub's auto-generated notes
+need a previous tag to diff against, which the first published tag does not
+have — paste this into the release description after goreleaser publishes it.
 -->
 
-Initial release of the VStack Cloud Panel provider.
+First usable release of the VStack Cloud Panel provider.
+
+> **Note on v0.1.0.** The v0.1.0 tag was removed from GitHub before its release
+> artifacts could be served, so `terraform init` fails on that version with a
+> checksum-download error. It is listed in the registry but must not be used —
+> pin `>= 0.1.1`.
 
 ## Features
 

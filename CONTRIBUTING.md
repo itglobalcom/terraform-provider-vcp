@@ -50,7 +50,7 @@ make setup               # same, plus generate ~/.terraformrc (overwrites it)
 ```
 
 `install-filesystem` first removes every previously installed version from the plugin mirror:
-examples pin `>= 0.1.0`, and a leftover higher version would silently win. The mirror stores the
+the runnable examples pin no version, and a leftover higher one would silently win. The mirror stores the
 provider like a released one, so after each reinstall an example's `.terraform.lock.hcl` still
 holds the *previous* binary's checksum — run `terraform init -upgrade` in that directory (or
 `make clean`, which deletes the lock files instead).

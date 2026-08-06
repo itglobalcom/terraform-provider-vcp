@@ -5,7 +5,9 @@ export
 HOSTNAME     := registry.terraform.io
 NAMESPACE    := itglobalcom
 NAME         := vcp
-VERSION      ?= 0.1.0
+# Local dev builds only — released versions come from the git tag via
+# goreleaser, so this never needs bumping.
+VERSION      ?= 0.0.1
 OS_ARCH      ?= $(shell go env GOOS)_$(shell go env GOARCH)
 BINARY       := terraform-provider-$(NAME)
 PLUGINS_DIR  := $(HOME)/.terraform.d/plugins
@@ -57,8 +59,8 @@ release: ## Build binaries for all platforms into bin/
 		GOOS=$$os GOARCH=$$arch go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY)_$(VERSION)_$${os}_$${arch}$$ext || exit 1; \
 	done
 
-# Drop every previously installed version first: examples pin ">= 0.1.0", so a
-# leftover higher version would win over the build we just made.
+# Drop every previously installed version first: the runnable examples pin no
+# version, so a leftover higher one would win over the build we just made.
 install-filesystem: build ## Install the provider into filesystem_mirror
 	@rm -rf $(PLUGINS_DIR)/$(HOSTNAME)/$(NAMESPACE)/$(NAME)
 	@dir=$(PLUGINS_DIR)/$(HOSTNAME)/$(NAMESPACE)/$(NAME)/$(VERSION)/$(OS_ARCH); \

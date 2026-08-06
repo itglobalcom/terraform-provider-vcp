@@ -1,8 +1,7 @@
 terraform {
   required_providers {
     vcp = {
-      source  = "itglobalcom/vcp"
-      version = ">= 0.1.0"
+      source = "itglobalcom/vcp"
     }
   }
 }
