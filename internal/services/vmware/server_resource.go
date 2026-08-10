@@ -192,7 +192,7 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	createReq.Gpu = gpu
+	createReq.GPU = gpu
 
 	tflog.Info(ctx, "Creating VMware server", map[string]any{"name": createReq.Name})
 	order, err := r.client.CreateVmwareServer(ctx, createReq)
@@ -267,7 +267,8 @@ func (r *serverResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// Rename (display name).
 	if !plan.Name.Equal(state.Name) {
-		if err := r.client.RenameVmwareServer(ctx, serverID, plan.Name.ValueString()); err != nil {
+		// C-11: RenameVmwareServer now takes *entities.VmwareRenameServerRequest.
+		if err := r.client.RenameVmwareServer(ctx, serverID, &entities.VmwareRenameServerRequest{Name: plan.Name.ValueString()}); err != nil {
 			resp.Diagnostics.AddError("Error Renaming VMware Server", err.Error())
 			return
 		}
@@ -353,7 +354,7 @@ func int64ListToInts(ctx context.Context, list types.List) ([]int, diag.Diagnost
 	return out, diags
 }
 
-func buildGpuRequest(ctx context.Context, obj types.Object) (*entities.VmwareGpuRequest, diag.Diagnostics) {
+func buildGpuRequest(ctx context.Context, obj types.Object) (*entities.VmwareGPURequest, diag.Diagnostics) {
 	if obj.IsNull() || obj.IsUnknown() {
 		return nil, nil
 	}
@@ -366,7 +367,7 @@ func buildGpuRequest(ctx context.Context, obj types.Object) (*entities.VmwareGpu
 	if diags.HasError() {
 		return nil, diags
 	}
-	req := &entities.VmwareGpuRequest{GpuModelID: int(gm.ModelID.ValueInt64())}
+	req := &entities.VmwareGPURequest{GPUModelID: int(gm.ModelID.ValueInt64())}
 	if !gm.VramMB.IsNull() && !gm.VramMB.IsUnknown() {
 		v := int(gm.VramMB.ValueInt64())
 		req.VramMB = &v

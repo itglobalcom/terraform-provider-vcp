@@ -110,7 +110,7 @@ func (d *locationsDataSource) Read(ctx context.Context, _ datasource.ReadRequest
 		state.Locations = append(state.Locations, vmwareLocationModel{
 			ID:           types.Int64Value(int64(l.ID)),
 			TechTitle:    types.StringValue(l.TechTitle),
-			GpuSupported: types.BoolValue(l.GpuSupported),
+			GpuSupported: types.BoolValue(l.GPUSupported),
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -208,9 +208,9 @@ func (d *imagesDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 			SSHKeySupported:      types.BoolValue(img.SSHKeySupported),
 			CPUHotAdd:            types.BoolValue(img.CPUHotAdd),
 			MemoryHotAdd:         types.BoolValue(img.MemoryHotAdd),
-			NicHotRemove:         types.BoolValue(img.NicHotRemove),
-			IsGpuOnly:            types.BoolValue(img.IsGpuOnly),
-			SupportedGpuModelIDs: types.ListValueMust(types.Int64Type, int64AttrVals(img.SupportedGpuModelIDs)),
+			NicHotRemove:         types.BoolValue(img.NICHotRemove),
+			IsGpuOnly:            types.BoolValue(img.IsGPUOnly),
+			SupportedGpuModelIDs: types.ListValueMust(types.Int64Type, int64AttrVals(img.SupportedGPUModelIDs)),
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &cfg)...)
@@ -458,7 +458,7 @@ func (d *gpuModelsDataSource) Read(ctx context.Context, req datasource.ReadReque
 			TechTitle:             types.StringValue(gm.TechTitle),
 			Name:                  types.StringValue(gm.Name),
 			CapacityVramMB:        types.Int64Value(int64(gm.CapacityVramMB)),
-			GpuCardCount:          types.Int64Value(int64(gm.GpuCardCount)),
+			GpuCardCount:          types.Int64Value(int64(gm.GPUCardCount)),
 			ServerAllocationLimit: types.Int64Value(int64(gm.ServerAllocationLimit)),
 			MaxServerRamMB:        types.Int64Null(),
 			IsAvailable:           types.BoolNull(),

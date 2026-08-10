@@ -78,18 +78,18 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 		m.VmToolsInstalled = types.BoolNull()
 	}
 
-	if s.Gpu != nil {
+	if s.GPU != nil {
 		m.Gpu = types.ObjectValueMust(gpuAttrTypes, map[string]attr.Value{
-			"model_id":   types.Int64Value(int64(s.Gpu.ModelID)),
-			"vram_mb":    types.Int64Value(int64(s.Gpu.VramMB)),
-			"card_count": types.Int64Value(int64(s.Gpu.CardCount)),
+			"model_id":   types.Int64Value(int64(s.GPU.ModelID)),
+			"vram_mb":    types.Int64Value(int64(s.GPU.VramMB)),
+			"card_count": types.Int64Value(int64(s.GPU.CardCount)),
 		})
 	} else {
 		m.Gpu = types.ObjectNull(gpuAttrTypes)
 	}
 
-	nics := make([]attr.Value, 0, len(s.Nics))
-	for _, n := range s.Nics {
+	nics := make([]attr.Value, 0, len(s.NICs))
+	for _, n := range s.NICs {
 		ip := types.StringNull()
 		if n.IP != nil {
 			ip = types.StringValue(*n.IP)
