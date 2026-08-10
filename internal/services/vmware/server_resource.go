@@ -111,10 +111,13 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional:      true,
 				Description:   "GPU profile. Changing this forces recreation.",
 				PlanModifiers: []planmodifier.Object{objectplanmodifier.RequiresReplace()},
+				// When a gpu block is present the backend selects the slicing policy by
+				// the exact (model_id, vram_mb, card_count) triple, so all three are
+				// required — the platform does not derive vram_mb/card_count (SDK S4).
 				Attributes: map[string]schema.Attribute{
 					"model_id":   schema.Int64Attribute{Required: true, Description: "GPU model ID."},
-					"vram_mb":    schema.Int64Attribute{Optional: true, Computed: true, Description: "VRAM in MB."},
-					"card_count": schema.Int64Attribute{Optional: true, Computed: true, Description: "Number of GPU cards."},
+					"vram_mb":    schema.Int64Attribute{Required: true, Description: "VRAM in MB."},
+					"card_count": schema.Int64Attribute{Required: true, Description: "Number of GPU cards."},
 				},
 			},
 			"state":              schema.StringAttribute{Computed: true, Description: "Server lifecycle state."},
