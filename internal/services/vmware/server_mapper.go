@@ -67,10 +67,13 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 	} else {
 		m.ComputerName = types.StringNull()
 	}
+	// system_disk_type is Optional+Computed+RequiresReplace and read may omit it
+	// (SDK field is *string,omitempty). Only overwrite from the response when the
+	// API actually returned it; otherwise keep the caller's plan/prior value, so a
+	// user-set "ssd" is not clobbered to null (which would cause an inconsistent
+	// result and a perpetual replace).
 	if s.SystemDiskType != nil {
 		m.SystemDiskType = types.StringValue(*s.SystemDiskType)
-	} else {
-		m.SystemDiskType = types.StringNull()
 	}
 	if s.VmToolsInstalled != nil {
 		m.VmToolsInstalled = types.BoolValue(*s.VmToolsInstalled)

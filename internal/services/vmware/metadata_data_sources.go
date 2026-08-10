@@ -446,7 +446,7 @@ func (d *gpuModelsDataSource) Read(ctx context.Context, req datasource.ReadReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	items, err := d.client.GetVmwareGpuModelList(ctx, optionalInt(cfg.LocationID))
+	items, err := d.client.GetVmwareGPUModelList(ctx, optionalInt(cfg.LocationID))
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read VMware GPU models", err.Error())
 		return

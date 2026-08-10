@@ -9,7 +9,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -94,10 +96,13 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description:   "Bandwidth (Mbps) for the public interface at creation. Changing this forces recreation.",
 				PlanModifiers: requiresReplaceInt,
 			},
+			// backup_enabled/ssh_keys/need_sysprep are write-only create inputs that
+			// Update never applies; without RequiresReplace a post-create change would
+			// be silently swallowed (state would diverge from the backend).
 			"backup_enabled": schema.BoolAttribute{
 				Optional:      true,
 				Description:   "Enable backups at creation. Changing this forces recreation.",
-				PlanModifiers: []planmodifier.Bool{},
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
 			},
 			"backup_period": schema.Int64Attribute{
 				Optional:      true,
@@ -105,13 +110,15 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: requiresReplaceInt,
 			},
 			"ssh_keys": schema.ListAttribute{
-				Optional:    true,
-				ElementType: types.Int64Type,
-				Description: "SSH key IDs to inject at creation. Changing this forces recreation.",
+				Optional:      true,
+				ElementType:   types.Int64Type,
+				Description:   "SSH key IDs to inject at creation. Changing this forces recreation.",
+				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
 			},
 			"need_sysprep": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Run sysprep at creation. Changing this forces recreation.",
+				Optional:      true,
+				Description:   "Run sysprep at creation. Changing this forces recreation.",
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
 			},
 			"gpu": schema.SingleNestedAttribute{
 				Optional:      true,
