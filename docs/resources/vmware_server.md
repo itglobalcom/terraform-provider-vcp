@@ -59,7 +59,9 @@ resource "vcp_vmware_server" "gpu" {
 
 - `backup_enabled` (Boolean) Enable backups at creation. Changing this forces recreation.
 - `backup_period` (Number) Backup period at creation. Changing this forces recreation.
-- `computer_name` (String) Guest OS hostname.
+- `computer_name` (String) Guest OS hostname. If omitted, the platform derives one.
+
+**Note:** the backend normalises this value to **UPPERCASE** (see review SRV-3). Supply it in uppercase, otherwise Terraform reports a perpetual diff or an `inconsistent result after apply` error.
 - `gpu` (Attributes) GPU profile. Changing this forces recreation. (see [below for nested schema](#nestedatt--gpu))
 - `need_sysprep` (Boolean) Run sysprep at creation. Changing this forces recreation.
 - `network_bandwidth_mbps` (Number) Bandwidth (Mbps) for the public interface at creation. Changing this forces recreation.
@@ -81,11 +83,8 @@ resource "vcp_vmware_server" "gpu" {
 
 Required:
 
-- `model_id` (Number) GPU model ID.
-
-Optional:
-
 - `card_count` (Number) Number of GPU cards.
+- `model_id` (Number) GPU model ID.
 - `vram_mb` (Number) VRAM in MB.
 
 

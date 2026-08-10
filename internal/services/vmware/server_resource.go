@@ -57,9 +57,15 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Display name of the server.",
 			},
 			"computer_name": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Guest OS hostname.",
+				Optional: true,
+				Computed: true,
+				Description: "Guest OS hostname. If omitted, the platform derives one. " +
+					"Note: the backend normalises the value to UPPERCASE (SRV-3), so supply it " +
+					"in uppercase to avoid a perpetual diff / \"inconsistent result after apply\".",
+				MarkdownDescription: "Guest OS hostname. If omitted, the platform derives one.\n\n" +
+					"**Note:** the backend normalises this value to **UPPERCASE** (see review SRV-3). " +
+					"Supply it in uppercase, otherwise Terraform reports a perpetual diff or an " +
+					"`inconsistent result after apply` error.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},

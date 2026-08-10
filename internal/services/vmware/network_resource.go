@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
@@ -25,6 +26,28 @@ const (
 	networkTypeRouted   = "routed"
 	networkTypePublic   = "public"
 )
+
+// coarseNetworkType maps the granular network type returned by the API
+// (entities.VmwareNetworkType*) back to the coarse selector this resource
+// accepts on input (isolated/routed/public). Without this the read value
+// ("routed_client", "public_shared", …) would never equal the configured
+// `type` and every apply would fail with "inconsistent result after apply";
+// it also lets ImportState recover `type` from a read. The mapping is
+// many-to-one and deterministic in this direction.
+func coarseNetworkType(apiType string) string {
+	switch apiType {
+	case entities.VmwareNetworkTypePrivateClient:
+		return networkTypeIsolated
+	case entities.VmwareNetworkTypeRoutedClient:
+		return networkTypeRouted
+	case entities.VmwareNetworkTypePublicClient,
+		entities.VmwareNetworkTypePublicShared,
+		entities.VmwareNetworkTypePublicSharedIPv6:
+		return networkTypePublic
+	default:
+		return apiType // unknown future type: surface it as-is
+	}
+}
 
 var (
 	_ resource.Resource                = &networkResource{}
@@ -190,6 +213,9 @@ func (r *networkResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	state := mapNetworkToModel(network)
+	// Map the granular API type back to the coarse input selector so it equals
+	// the configured `type` (isolated/routed/public).
+	state.Type = types.StringValue(coarseNetworkType(network.Type))
 	// Preserve write-only create inputs (not returned by read).
 	state.EnableDhcp = plan.EnableDhcp
 	state.Capacity = plan.Capacity
@@ -230,6 +256,7 @@ func (r *networkResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	refreshed := mapNetworkToModel(network)
+	refreshed.Type = types.StringValue(coarseNetworkType(network.Type))
 	// Preserve write-only create inputs that read does not return.
 	refreshed.EnableDhcp = state.EnableDhcp
 	refreshed.Capacity = state.Capacity
@@ -270,6 +297,7 @@ func (r *networkResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 	newState := mapNetworkToModel(network)
+	newState.Type = types.StringValue(coarseNetworkType(network.Type))
 	newState.EnableDhcp = plan.EnableDhcp
 	newState.Capacity = plan.Capacity
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
