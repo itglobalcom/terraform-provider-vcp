@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -62,14 +63,15 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Computed: true,
 				Description: "Guest OS hostname. If omitted, the platform derives one. " +
-					"Note: the backend normalises the value to UPPERCASE (SRV-3), so supply it " +
-					"in uppercase to avoid a perpetual diff / \"inconsistent result after apply\".",
+					"The backend normalises the value to UPPERCASE (SRV-3); a case-only difference " +
+					"is suppressed so it does not produce a perpetual diff.",
 				MarkdownDescription: "Guest OS hostname. If omitted, the platform derives one.\n\n" +
-					"**Note:** the backend normalises this value to **UPPERCASE** (see review SRV-3). " +
-					"Supply it in uppercase, otherwise Terraform reports a perpetual diff or an " +
-					"`inconsistent result after apply` error.",
+					"The backend normalises this value to **UPPERCASE** (review SRV-3); the provider " +
+					"treats `computer_name` case-insensitively, so writing it in any case does not " +
+					"cause a perpetual diff.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					caseInsensitiveStringModifier{}, // SRV-3
 				},
 			},
 			"image_id": schema.Int64Attribute{
@@ -393,4 +395,28 @@ func buildGpuRequest(ctx context.Context, obj types.Object) (*entities.VmwareGPU
 		req.CardCount = &v
 	}
 	return req, diags
+}
+
+// caseInsensitiveStringModifier suppresses a plan diff when the planned value
+// differs from the prior state only by letter case. SRV-3: the backend upper-cases
+// computer_name, so without this a lowercase config value would diff forever
+// against the stored uppercase value.
+type caseInsensitiveStringModifier struct{}
+
+func (m caseInsensitiveStringModifier) Description(_ context.Context) string {
+	return "Suppresses case-only differences (the backend upper-cases the value, SRV-3)."
+}
+
+func (m caseInsensitiveStringModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m caseInsensitiveStringModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	// Only act on a known planned value against an existing state value.
+	if req.StateValue.IsNull() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+	if strings.EqualFold(req.StateValue.ValueString(), req.PlanValue.ValueString()) {
+		resp.PlanValue = req.StateValue
+	}
 }
