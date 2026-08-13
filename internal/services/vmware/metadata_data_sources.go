@@ -52,6 +52,14 @@ func optionalBool(v types.Bool) *bool {
 	return &x
 }
 
+func optionalString(v types.String) *string {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	x := v.ValueString()
+	return &x
+}
+
 // ===================== Locations =====================
 
 var (
@@ -64,9 +72,23 @@ func NewLocationsDataSource() datasource.DataSource { return &locationsDataSourc
 type locationsDataSource struct{ client *sdk.CloudClient }
 
 type vmwareLocationModel struct {
-	ID           types.Int64  `tfsdk:"id"`
-	TechTitle    types.String `tfsdk:"tech_title"`
-	GpuSupported types.Bool   `tfsdk:"gpu_supported"`
+	ID           types.Int64                   `tfsdk:"id"`
+	TechTitle    types.String                  `tfsdk:"tech_title"`
+	GpuSupported types.Bool                    `tfsdk:"gpu_supported"`
+	DiskTypes    []vmwareLocationDiskTypeModel `tfsdk:"disk_types"`
+}
+
+// vmwareLocationDiskTypeModel is a disk type offered inside a location (API-11
+// redesign). Limits are in MB, keyed by title.
+type vmwareLocationDiskTypeModel struct {
+	Title                  types.String `tfsdk:"title"`
+	IsDefault              types.Bool   `tfsdk:"is_default"`
+	IsSSD                  types.Bool   `tfsdk:"is_ssd"`
+	IsAllowedForSystemDisk types.Bool   `tfsdk:"is_allowed_for_system_disk"`
+	MinMB                  types.Int64  `tfsdk:"min_mb"`
+	MaxMB                  types.Int64  `tfsdk:"max_mb"`
+	StepMB                 types.Int64  `tfsdk:"step_mb"`
+	DefaultSizeMB          types.Int64  `tfsdk:"default_size_mb"`
 }
 
 type locationsListModel struct {
@@ -88,6 +110,21 @@ func (d *locationsDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 						"id":            schema.Int64Attribute{Computed: true},
 						"tech_title":    schema.StringAttribute{Computed: true},
 						"gpu_supported": schema.BoolAttribute{Computed: true},
+						"disk_types": schema.ListNestedAttribute{
+							Computed: true,
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									"title":                      schema.StringAttribute{Computed: true},
+									"is_default":                 schema.BoolAttribute{Computed: true},
+									"is_ssd":                     schema.BoolAttribute{Computed: true},
+									"is_allowed_for_system_disk": schema.BoolAttribute{Computed: true},
+									"min_mb":                     schema.Int64Attribute{Computed: true},
+									"max_mb":                     schema.Int64Attribute{Computed: true},
+									"step_mb":                    schema.Int64Attribute{Computed: true},
+									"default_size_mb":            schema.Int64Attribute{Computed: true},
+								},
+							},
+						},
 					},
 				},
 			},
@@ -107,10 +144,24 @@ func (d *locationsDataSource) Read(ctx context.Context, _ datasource.ReadRequest
 	}
 	state := locationsListModel{Locations: make([]vmwareLocationModel, 0, len(items))}
 	for _, l := range items {
+		diskTypes := make([]vmwareLocationDiskTypeModel, 0, len(l.DiskTypes))
+		for _, dt := range l.DiskTypes {
+			diskTypes = append(diskTypes, vmwareLocationDiskTypeModel{
+				Title:                  types.StringValue(dt.Title),
+				IsDefault:              types.BoolValue(dt.IsDefault),
+				IsSSD:                  types.BoolValue(dt.IsSSD),
+				IsAllowedForSystemDisk: types.BoolValue(dt.IsAllowedForSystemDisk),
+				MinMB:                  types.Int64Value(int64(dt.MinMB)),
+				MaxMB:                  types.Int64Value(int64(dt.MaxMB)),
+				StepMB:                 types.Int64Value(int64(dt.StepMB)),
+				DefaultSizeMB:          types.Int64Value(int64(dt.DefaultSizeMB)),
+			})
+		}
 		state.Locations = append(state.Locations, vmwareLocationModel{
 			ID:           types.Int64Value(int64(l.ID)),
 			TechTitle:    types.StringValue(l.TechTitle),
 			GpuSupported: types.BoolValue(l.GPUSupported),
+			DiskTypes:    diskTypes,
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -144,7 +195,7 @@ type vmwareImageModel struct {
 
 type imagesListModel struct {
 	LocationID types.Int64        `tfsdk:"location_id"`
-	GpuOnly    types.Bool         `tfsdk:"gpu_only"`
+	Gpu        types.String       `tfsdk:"gpu"`
 	Images     []vmwareImageModel `tfsdk:"images"`
 }
 
@@ -157,7 +208,7 @@ func (d *imagesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 		Description: "List available VMware Cloud OS images/templates.",
 		Attributes: map[string]schema.Attribute{
 			"location_id": schema.Int64Attribute{Optional: true, Description: "Filter images by location ID."},
-			"gpu_only":    schema.BoolAttribute{Optional: true, Description: "Return only GPU-enabled images."},
+			"gpu":         schema.StringAttribute{Optional: true, Description: "GPU filter: \"required\" (GPU-only images) or \"unsupported\" (non-GPU images); omit for all."},
 			"images": schema.ListNestedAttribute{
 				Computed: true,
 				NestedObject: schema.NestedAttributeObject{
@@ -191,7 +242,7 @@ func (d *imagesDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	items, err := d.client.GetVmwareImageList(ctx, optionalInt(cfg.LocationID), optionalBool(cfg.GpuOnly))
+	items, err := d.client.GetVmwareImageList(ctx, optionalInt(cfg.LocationID), optionalString(cfg.Gpu))
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read VMware images", err.Error())
 		return
@@ -211,171 +262,6 @@ func (d *imagesDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 			NicHotRemove:         types.BoolValue(img.NICHotRemove),
 			IsGpuOnly:            types.BoolValue(img.IsGPUOnly),
 			SupportedGpuModelIDs: types.ListValueMust(types.Int64Type, int64AttrVals(img.SupportedGPUModelIDs)),
-		})
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &cfg)...)
-}
-
-// ===================== Disk types =====================
-
-var (
-	_ datasource.DataSource              = &diskTypesDataSource{}
-	_ datasource.DataSourceWithConfigure = &diskTypesDataSource{}
-)
-
-func NewDiskTypesDataSource() datasource.DataSource { return &diskTypesDataSource{} }
-
-type diskTypesDataSource struct{ client *sdk.CloudClient }
-
-type vmwareDiskTypeModel struct {
-	ID                     types.Int64  `tfsdk:"id"`
-	Title                  types.String `tfsdk:"title"`
-	MinGB                  types.Int64  `tfsdk:"min_gb"`
-	MaxGB                  types.Int64  `tfsdk:"max_gb"`
-	StepGB                 types.Int64  `tfsdk:"step_gb"`
-	StartValueGB           types.Int64  `tfsdk:"start_value_gb"`
-	IsAllowedForSystemDisk types.Bool   `tfsdk:"is_allowed_for_system_disk"`
-	IsSSD                  types.Bool   `tfsdk:"is_ssd"`
-}
-
-type diskTypesListModel struct {
-	LocationID types.Int64           `tfsdk:"location_id"`
-	DiskTypes  []vmwareDiskTypeModel `tfsdk:"disk_types"`
-}
-
-func (d *diskTypesDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_vmware_disk_types"
-}
-
-func (d *diskTypesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Description: "List available VMware Cloud disk types.",
-		Attributes: map[string]schema.Attribute{
-			"location_id": schema.Int64Attribute{Optional: true, Description: "Filter disk types by location ID."},
-			"disk_types": schema.ListNestedAttribute{
-				Computed: true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id":                         schema.Int64Attribute{Computed: true},
-						"title":                      schema.StringAttribute{Computed: true},
-						"min_gb":                     schema.Int64Attribute{Computed: true},
-						"max_gb":                     schema.Int64Attribute{Computed: true},
-						"step_gb":                    schema.Int64Attribute{Computed: true},
-						"start_value_gb":             schema.Int64Attribute{Computed: true},
-						"is_allowed_for_system_disk": schema.BoolAttribute{Computed: true},
-						"is_ssd":                     schema.BoolAttribute{Computed: true},
-					},
-				},
-			},
-		},
-	}
-}
-
-func (d *diskTypesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	d.client = configureClient(req.ProviderData, &resp.Diagnostics)
-}
-
-func (d *diskTypesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var cfg diskTypesListModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	items, err := d.client.GetVmwareDiskTypeList(ctx, optionalInt(cfg.LocationID))
-	if err != nil {
-		resp.Diagnostics.AddError("Unable to read VMware disk types", err.Error())
-		return
-	}
-	cfg.DiskTypes = make([]vmwareDiskTypeModel, 0, len(items))
-	for _, dt := range items {
-		cfg.DiskTypes = append(cfg.DiskTypes, vmwareDiskTypeModel{
-			ID:                     types.Int64Value(int64(dt.ID)),
-			Title:                  types.StringValue(dt.Title),
-			MinGB:                  types.Int64Value(int64(dt.MinGB)),
-			MaxGB:                  types.Int64Value(int64(dt.MaxGB)),
-			StepGB:                 types.Int64Value(int64(dt.StepGB)),
-			StartValueGB:           types.Int64Value(int64(dt.StartValueGB)),
-			IsAllowedForSystemDisk: types.BoolValue(dt.IsAllowedForSystemDisk),
-			IsSSD:                  types.BoolValue(dt.IsSSD),
-		})
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &cfg)...)
-}
-
-// ===================== Storage profiles =====================
-
-var (
-	_ datasource.DataSource              = &storageProfilesDataSource{}
-	_ datasource.DataSourceWithConfigure = &storageProfilesDataSource{}
-)
-
-func NewStorageProfilesDataSource() datasource.DataSource { return &storageProfilesDataSource{} }
-
-type storageProfilesDataSource struct{ client *sdk.CloudClient }
-
-type vmwareStorageProfileModel struct {
-	ID          types.Int64  `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	DiskTypeID  types.Int64  `tfsdk:"disk_type_id"`
-	IsDefault   types.Bool   `tfsdk:"is_default"`
-	FreeSpaceGB types.Int64  `tfsdk:"free_space_gb"`
-}
-
-type storageProfilesListModel struct {
-	LocationID      types.Int64                 `tfsdk:"location_id"`
-	DiskTypeID      types.Int64                 `tfsdk:"disk_type_id"`
-	StorageProfiles []vmwareStorageProfileModel `tfsdk:"storage_profiles"`
-}
-
-func (d *storageProfilesDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_vmware_storage_profiles"
-}
-
-func (d *storageProfilesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Description: "List available VMware Cloud storage profiles.",
-		Attributes: map[string]schema.Attribute{
-			"location_id":  schema.Int64Attribute{Optional: true, Description: "Filter storage profiles by location ID."},
-			"disk_type_id": schema.Int64Attribute{Optional: true, Description: "Filter storage profiles by disk type ID."},
-			"storage_profiles": schema.ListNestedAttribute{
-				Computed: true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id":            schema.Int64Attribute{Computed: true},
-						"name":          schema.StringAttribute{Computed: true},
-						"disk_type_id":  schema.Int64Attribute{Computed: true},
-						"is_default":    schema.BoolAttribute{Computed: true},
-						"free_space_gb": schema.Int64Attribute{Computed: true},
-					},
-				},
-			},
-		},
-	}
-}
-
-func (d *storageProfilesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	d.client = configureClient(req.ProviderData, &resp.Diagnostics)
-}
-
-func (d *storageProfilesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var cfg storageProfilesListModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	items, err := d.client.GetVmwareStorageProfileList(ctx, optionalInt(cfg.LocationID), optionalInt(cfg.DiskTypeID))
-	if err != nil {
-		resp.Diagnostics.AddError("Unable to read VMware storage profiles", err.Error())
-		return
-	}
-	cfg.StorageProfiles = make([]vmwareStorageProfileModel, 0, len(items))
-	for _, sp := range items {
-		cfg.StorageProfiles = append(cfg.StorageProfiles, vmwareStorageProfileModel{
-			ID:          types.Int64Value(int64(sp.ID)),
-			Name:        types.StringValue(sp.Name),
-			DiskTypeID:  types.Int64Value(int64(sp.DiskTypeID)),
-			IsDefault:   types.BoolValue(sp.IsDefault),
-			FreeSpaceGB: types.Int64Value(int64(sp.FreeSpaceGB)),
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &cfg)...)

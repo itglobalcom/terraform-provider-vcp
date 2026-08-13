@@ -69,12 +69,13 @@ func dsServerAttributes(computedID bool) map[string]schema.Attribute {
 		Computed: true,
 		NestedObject: schema.NestedAttributeObject{
 			Attributes: map[string]schema.Attribute{
-				"id":         schema.Int64Attribute{Computed: true},
-				"number":     schema.Int64Attribute{Computed: true},
-				"is_primary": schema.BoolAttribute{Computed: true},
-				"network_id": schema.Int64Attribute{Computed: true},
-				"ip":         schema.StringAttribute{Computed: true},
-				"mac":        schema.StringAttribute{Computed: true},
+				"id":             schema.Int64Attribute{Computed: true},
+				"number":         schema.Int64Attribute{Computed: true},
+				"is_primary":     schema.BoolAttribute{Computed: true},
+				"network_id":     schema.Int64Attribute{Computed: true},
+				"ip":             schema.StringAttribute{Computed: true},
+				"mac":            schema.StringAttribute{Computed: true},
+				"bandwidth_mbps": schema.Int64Attribute{Computed: true}, // SRV-5
 			},
 		},
 	}

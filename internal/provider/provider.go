@@ -248,8 +248,6 @@ func (p *CloudProvider) DataSources(ctx context.Context) []func() datasource.Dat
 		dns.NewDomainsDataSource,
 		vmware.NewLocationsDataSource,
 		vmware.NewImagesDataSource,
-		vmware.NewDiskTypesDataSource,
-		vmware.NewStorageProfilesDataSource,
 		vmware.NewGpuModelsDataSource,
 		vmware.NewServerDataSource,
 		vmware.NewServersDataSource,

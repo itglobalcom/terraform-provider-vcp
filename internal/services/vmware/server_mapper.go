@@ -7,12 +7,13 @@ import (
 )
 
 var nicAttrTypes = map[string]attr.Type{
-	"id":         types.Int64Type,
-	"number":     types.Int64Type,
-	"is_primary": types.BoolType,
-	"network_id": types.Int64Type,
-	"ip":         types.StringType,
-	"mac":        types.StringType,
+	"id":             types.Int64Type,
+	"number":         types.Int64Type,
+	"is_primary":     types.BoolType,
+	"network_id":     types.Int64Type,
+	"ip":             types.StringType,
+	"mac":            types.StringType,
+	"bandwidth_mbps": types.Int64Type, // SRV-5
 }
 
 var gpuAttrTypes = map[string]attr.Type{
@@ -98,12 +99,13 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 			ip = types.StringValue(*n.IP)
 		}
 		nics = append(nics, types.ObjectValueMust(nicAttrTypes, map[string]attr.Value{
-			"id":         types.Int64Value(int64(n.ID)),
-			"number":     types.Int64Value(int64(n.Number)),
-			"is_primary": types.BoolValue(n.IsPrimary),
-			"network_id": types.Int64Value(int64(n.NetworkID)),
-			"ip":         ip,
-			"mac":        types.StringValue(n.Mac),
+			"id":             types.Int64Value(int64(n.ID)),
+			"number":         types.Int64Value(int64(n.Number)),
+			"is_primary":     types.BoolValue(n.IsPrimary),
+			"network_id":     types.Int64Value(int64(n.NetworkID)),
+			"ip":             ip,
+			"mac":            types.StringValue(n.Mac),
+			"bandwidth_mbps": types.Int64Value(int64(n.BandwidthMbps)), // SRV-5
 		}))
 	}
 	m.Nics = types.ListValueMust(types.ObjectType{AttrTypes: nicAttrTypes}, nics)

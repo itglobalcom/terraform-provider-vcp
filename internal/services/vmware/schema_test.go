@@ -34,15 +34,13 @@ func TestResourceSchemas(t *testing.T) {
 // TestDataSourceSchemas ensures every VMware data-source schema is consistent.
 func TestDataSourceSchemas(t *testing.T) {
 	dataSources := map[string]func() datasource.DataSource{
-		"vcp_vmware_locations":        NewLocationsDataSource,
-		"vcp_vmware_images":           NewImagesDataSource,
-		"vcp_vmware_disk_types":       NewDiskTypesDataSource,
-		"vcp_vmware_storage_profiles": NewStorageProfilesDataSource,
-		"vcp_vmware_gpu_models":       NewGpuModelsDataSource,
-		"vcp_vmware_server":           NewServerDataSource,
-		"vcp_vmware_servers":          NewServersDataSource,
-		"vcp_vmware_network":          NewNetworkDataSource,
-		"vcp_vmware_networks":         NewNetworksDataSource,
+		"vcp_vmware_locations":  NewLocationsDataSource,
+		"vcp_vmware_images":     NewImagesDataSource,
+		"vcp_vmware_gpu_models": NewGpuModelsDataSource,
+		"vcp_vmware_server":     NewServerDataSource,
+		"vcp_vmware_servers":    NewServersDataSource,
+		"vcp_vmware_network":    NewNetworkDataSource,
+		"vcp_vmware_networks":   NewNetworksDataSource,
 	}
 	for name, ctor := range dataSources {
 		t.Run(name, func(t *testing.T) {
