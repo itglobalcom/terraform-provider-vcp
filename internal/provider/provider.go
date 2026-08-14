@@ -224,6 +224,12 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		dns.NewRecordSetResource,
 		vmware.NewNetworkResource,
 		vmware.NewServerResource,
+		vmware.NewServerNetworkAttachmentResource,
+		vmware.NewServerPublicInterfaceResource,
+		vmware.NewServerFirewallResource,
+		vmware.NewEdgeFirewallResource,
+		vmware.NewEdgeNATResource,
+		vmware.NewEdgeVPNTunnelResource,
 	}
 }
 

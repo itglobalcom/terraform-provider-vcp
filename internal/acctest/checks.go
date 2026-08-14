@@ -162,6 +162,45 @@ func CheckSSHKeysDestroyed(s *terraform.State) error {
 	})
 }
 
+// checkDestroyedInt is checkDestroyed for the VMware resources, whose ids are
+// numeric. A non-numeric id in state is a defect of its own, so it is reported
+// rather than skipped.
+func checkDestroyedInt(s *terraform.State, resourceType string, getByID func(ctx context.Context, id int) error) error {
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != resourceType {
+			continue
+		}
+		id, err := strconv.Atoi(rs.Primary.ID)
+		if err != nil {
+			return fmt.Errorf("unexpected non-numeric %s ID %q: %w", resourceType, rs.Primary.ID, err)
+		}
+		err = getByID(context.Background(), id)
+		if err == nil {
+			return fmt.Errorf("%s %d still exists", resourceType, id)
+		}
+		if !sdk.IsNotFound(err) {
+			return fmt.Errorf("error checking %s %d destruction: %w", resourceType, id, err)
+		}
+	}
+	return nil
+}
+
+// CheckVmwareServersDestroyed is a CheckDestroy for vcp_vmware_server resources.
+func CheckVmwareServersDestroyed(s *terraform.State) error {
+	return checkDestroyedInt(s, "vcp_vmware_server", func(ctx context.Context, id int) error {
+		_, err := GetTestClient().GetVmwareServer(ctx, id)
+		return err
+	})
+}
+
+// CheckVmwareNetworksDestroyed is a CheckDestroy for vcp_vmware_network resources.
+func CheckVmwareNetworksDestroyed(s *terraform.State) error {
+	return checkDestroyedInt(s, "vcp_vmware_network", func(ctx context.Context, id int) error {
+		_, err := GetTestClient().GetVmwareNetwork(ctx, id)
+		return err
+	})
+}
+
 // CheckDNSDomainsDestroyed is a CheckDestroy for vcp_dns_domain resources.
 func CheckDNSDomainsDestroyed(s *terraform.State) error {
 	return checkDestroyed(s, "vcp_dns_domain", func(ctx context.Context, id string) error {

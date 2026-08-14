@@ -47,6 +47,31 @@ func PreCheckServer(t *testing.T) {
 	}
 }
 
+// PreCheckVmware checks the environment variables required by the VMware Cloud
+// acceptance tests. VMware is a separate service with its own catalog, so it has
+// its own location variable rather than reusing VCP_LOCATION_ID.
+func PreCheckVmware(t *testing.T) {
+	if v := os.Getenv("VCP_API_TOKEN"); v == "" {
+		t.Fatal("VCP_API_TOKEN must be set for acceptance tests")
+	}
+	if v := os.Getenv("VCP_API_URL"); v == "" {
+		t.Fatal("VCP_API_URL must be set for acceptance tests")
+	}
+	if v := os.Getenv("VCP_VMWARE_LOCATION_ID"); v == "" {
+		t.Fatal("VCP_VMWARE_LOCATION_ID must be set for VMware acceptance tests")
+	}
+}
+
+// PreCheckVmwareServer checks everything PreCheckVmware requires, plus the OS
+// image the tests that create servers order from.
+func PreCheckVmwareServer(t *testing.T) {
+	PreCheckVmware(t)
+
+	if v := os.Getenv("VCP_VMWARE_IMAGE_ID"); v == "" {
+		t.Fatal("VCP_VMWARE_IMAGE_ID must be set for VMware acceptance tests that create servers")
+	}
+}
+
 // RandomString generates a random string
 func RandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"

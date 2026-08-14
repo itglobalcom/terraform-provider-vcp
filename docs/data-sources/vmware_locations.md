@@ -29,6 +29,21 @@ data "vcp_vmware_locations" "all" {}
 
 Read-Only:
 
+- `disk_types` (Attributes List) (see [below for nested schema](#nestedatt--locations--disk_types))
 - `gpu_supported` (Boolean)
 - `id` (Number)
 - `tech_title` (String)
+
+<a id="nestedatt--locations--disk_types"></a>
+### Nested Schema for `locations.disk_types`
+
+Read-Only:
+
+- `default_size_mb` (Number)
+- `is_allowed_for_system_disk` (Boolean)
+- `is_default` (Boolean)
+- `is_ssd` (Boolean)
+- `max_mb` (Number)
+- `min_mb` (Number)
+- `step_mb` (Number)
+- `title` (String)

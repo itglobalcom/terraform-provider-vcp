@@ -3,12 +3,33 @@
 page_title: "vcp_vmware_server Resource - vcp"
 subcategory: ""
 description: |-
-  Manages a VMware Cloud server. cpu, ram_mb, system_disk_mb, name and computer_name are editable in place; other inputs force recreation.
+  Manages a VMware Cloud server.
+  cpu, ram_mb, system_disk_mb, network_bandwidth_mbps, name, computer_name and volumes are changed in place. Everything else replaces the machine.
+  ~> Changing image_id destroys the server and creates another one — with a new id, a new address and an empty disk. There is no way to reinstall a machine in place, so a plan that shows a replacement here is a plan that loses the data. location_id, system_disk_type, public_network_id, gpu, ssh_key_ids, backup_* and need_sysprep replace it for the same reason.
+  ~> Resizing a running machine needs an image that supports it (cpu_hot_add / memory_hot_add in vcp_vmware_images). Without them, power the server off before applying.
+  Importing
+  terraform import vcp_vmware_server.<name> <id> reads everything the API reports. It cannot report the options that only exist at order time, so restate them in the configuration afterwards and check the first plan is empty:
+  ssh_key_ids, backup_enabled, backup_period, need_sysprep — write-only, never returned;public_network_id — the interface is reported, the network it was ordered from is not;computer_name — reported in the platform's upper-case spelling (SRV-3), which the provider compares case-insensitively;volumes — an imported server manages no disks until they are declared, each with a number of your choosing.
 ---
 
 # vcp_vmware_server (Resource)
 
-Manages a VMware Cloud server. `cpu`, `ram_mb`, `system_disk_mb`, `name` and `computer_name` are editable in place; other inputs force recreation.
+Manages a VMware Cloud server.
+
+`cpu`, `ram_mb`, `system_disk_mb`, `network_bandwidth_mbps`, `name`, `computer_name` and `volumes` are changed in place. Everything else replaces the machine.
+
+~> **Changing `image_id` destroys the server and creates another one** — with a new id, a new address and an empty disk. There is no way to reinstall a machine in place, so a plan that shows a replacement here is a plan that loses the data. `location_id`, `system_disk_type`, `public_network_id`, `gpu`, `ssh_key_ids`, `backup_*` and `need_sysprep` replace it for the same reason.
+
+~> Resizing a running machine needs an image that supports it (`cpu_hot_add` / `memory_hot_add` in `vcp_vmware_images`). Without them, power the server off before applying.
+
+### Importing
+
+`terraform import vcp_vmware_server.<name> <id>` reads everything the API reports. It cannot report the options that only exist at order time, so restate them in the configuration afterwards and check the first plan is empty:
+
+* `ssh_key_ids`, `backup_enabled`, `backup_period`, `need_sysprep` — write-only, never returned;
+* `public_network_id` — the interface is reported, the network it was ordered from is not;
+* `computer_name` — reported in the platform's upper-case spelling (SRV-3), which the provider compares case-insensitively;
+* `volumes` — an imported server manages no disks until they are declared, each with a `number` of your choosing.
 
 ## Example Usage
 
@@ -23,7 +44,7 @@ resource "vcp_vmware_server" "web" {
   system_disk_mb    = 51200
   system_disk_type  = "ssd"
   public_network_id = 100
-  ssh_keys          = [7]
+  ssh_key_ids       = [7]
 }
 
 # GPU server example.
@@ -36,8 +57,11 @@ resource "vcp_vmware_server" "gpu" {
   ram_mb         = 32768
   system_disk_mb = 102400
 
-  gpu {
+  # The backend selects the slicing policy by the exact triple, so all three
+  # values are required — pick them from a vcp_vmware_gpu_models entry.
+  gpu = {
     model_id   = 3
+    vram_mb    = 8192
     card_count = 1
   }
 }
@@ -61,13 +85,22 @@ resource "vcp_vmware_server" "gpu" {
 - `backup_period` (Number) Backup period at creation. Changing this forces recreation.
 - `computer_name` (String) Guest OS hostname. If omitted, the platform derives one.
 
-**Note:** the backend normalises this value to **UPPERCASE** (see review SRV-3). Supply it in uppercase, otherwise Terraform reports a perpetual diff or an `inconsistent result after apply` error.
+The backend normalises this value to **UPPERCASE** (review SRV-3); the provider treats `computer_name` case-insensitively, so writing it in any case does not cause a perpetual diff.
 - `gpu` (Attributes) GPU profile. Changing this forces recreation. (see [below for nested schema](#nestedatt--gpu))
 - `need_sysprep` (Boolean) Run sysprep at creation. Changing this forces recreation.
-- `network_bandwidth_mbps` (Number) Bandwidth (Mbps) for the public interface at creation. Changing this forces recreation.
-- `public_network_id` (Number) Public network to connect at creation. Changing this forces recreation.
-- `ssh_keys` (List of Number) SSH key IDs to inject at creation. Changing this forces recreation.
+- `network_bandwidth_mbps` (Number) Bandwidth (Mbps) of the server's primary public interface — the one every VMware server is created with. Editable in place.
+
+Mutually exclusive with `public_network_id`: when a network is named, the interface takes the bandwidth of that network and a value here would be ignored.
+- `public_network_id` (Number) Public network to connect at creation. When set, the interface takes its bandwidth from the network and network_bandwidth_mbps must not be set. Changing this forces recreation.
+- `ssh_key_ids` (Set of Number) SSH key IDs to inject at creation. Changing this forces recreation.
 - `system_disk_type` (String) System disk type. Changing this forces recreation.
+- `volumes` (Attributes List) Additional data disks attached to the server.
+
+~> The boot disk is **not** one of these: it is ordered together with the machine through `system_disk_mb` / `system_disk_type`.
+
+~> `number` is a key you choose and keep. It is what lets the provider tell a renamed volume from a replaced one, so changing a `number` means "delete that disk and create another", with the data going the way of the disk.
+
+~> Only the disks declared here are managed. A disk created in the panel is left alone and reported in a warning — the API does not mark which disk a machine boots from, so removing an unknown one is not a risk worth taking. (see [below for nested schema](#nestedatt--volumes))
 
 ### Read-Only
 
@@ -88,11 +121,27 @@ Required:
 - `vram_mb` (Number) VRAM in MB.
 
 
+<a id="nestedatt--volumes"></a>
+### Nested Schema for `volumes`
+
+Required:
+
+- `disk_type` (String) Disk type, by title, as offered by the location (vcp_vmware_locations). Changing it replaces the disk and loses its data.
+- `name` (String) Name of the volume. Editable in place.
+- `number` (Number) Stable key of the volume, unique within the server. Changing it replaces the disk.
+- `size_mb` (Number) Size in MB. Can be increased in place; shrinking is refused.
+
+Read-Only:
+
+- `id` (Number) ID of the volume in the API.
+
+
 <a id="nestedatt--nics"></a>
 ### Nested Schema for `nics`
 
 Read-Only:
 
+- `bandwidth_mbps` (Number)
 - `id` (Number)
 - `ip` (String)
 - `is_primary` (Boolean)

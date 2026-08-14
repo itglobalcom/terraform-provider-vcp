@@ -8,7 +8,7 @@ resource "vcp_vmware_server" "web" {
   system_disk_mb    = 51200
   system_disk_type  = "ssd"
   public_network_id = 100
-  ssh_keys          = [7]
+  ssh_key_ids       = [7]
 }
 
 # GPU server example.
@@ -21,8 +21,11 @@ resource "vcp_vmware_server" "gpu" {
   ram_mb         = 32768
   system_disk_mb = 102400
 
-  gpu {
+  # The backend selects the slicing policy by the exact triple, so all three
+  # values are required — pick them from a vcp_vmware_gpu_models entry.
+  gpu = {
     model_id   = 3
+    vram_mb    = 8192
     card_count = 1
   }
 }

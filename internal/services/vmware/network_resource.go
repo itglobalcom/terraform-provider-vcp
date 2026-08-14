@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
+	"github.com/itglobalcom/terraform-provider-vcp/internal/locks"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
 	"github.com/itglobalcom/vstack-cloud-panel-sdk/entities"
 )
@@ -50,9 +51,10 @@ func coarseNetworkType(apiType string) string {
 }
 
 var (
-	_ resource.Resource                = &networkResource{}
-	_ resource.ResourceWithConfigure   = &networkResource{}
-	_ resource.ResourceWithImportState = &networkResource{}
+	_ resource.Resource                   = &networkResource{}
+	_ resource.ResourceWithConfigure      = &networkResource{}
+	_ resource.ResourceWithImportState    = &networkResource{}
+	_ resource.ResourceWithValidateConfig = &networkResource{}
 )
 
 func NewNetworkResource() resource.Resource { return &networkResource{} }
@@ -144,6 +146,65 @@ func (r *networkResource) Configure(_ context.Context, req resource.ConfigureReq
 	r.client = client
 }
 
+// ValidateConfig refuses the attributes that belong to another flavour of
+// network, and asks for the ones this flavour cannot do without.
+//
+// Every one of these is refused by the API too, but with a message that names
+// neither the field nor the reason — an isolated network given a bandwidth
+// answers a flat "Network bandwidth outside allowable limits" (NET-3), which
+// reads as "pick another number" rather than "this network has no bandwidth".
+// Deciding it here also means the answer arrives at plan time, before anything
+// is created.
+func (r *networkResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config networkModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// A type taken from another resource is not known yet; the per-attribute
+	// validators still apply, and the API remains the backstop.
+	if !isSet(config.Type) {
+		return
+	}
+	netType := config.Type.ValueString()
+
+	notApplicable := func(attr string, set bool, why string) {
+		if set {
+			resp.Diagnostics.AddAttributeError(path.Root(attr), "Attribute Not Applicable To This Network",
+				fmt.Sprintf("%s does not apply to a %s network: %s.", attr, netType, why))
+		}
+	}
+	required := func(attr string, set bool, why string) {
+		if !set {
+			resp.Diagnostics.AddAttributeError(path.Root(attr), "Missing Attribute",
+				fmt.Sprintf("%s is required for a %s network: %s.", attr, netType, why))
+		}
+	}
+
+	addressSet := isSet(config.Address)
+	maskSet := !config.Mask.IsNull() && !config.Mask.IsUnknown()
+	dhcpSet := !config.EnableDhcp.IsNull() && !config.EnableDhcp.IsUnknown()
+	capacitySet := isSet(config.Capacity)
+	bandwidthSet := !config.BandwidthMbps.IsNull() && !config.BandwidthMbps.IsUnknown()
+
+	switch netType {
+	case networkTypeIsolated:
+		required("address", addressSet, "an isolated network is defined by the range it hands out")
+		notApplicable("capacity", capacitySet, "capacity orders public addresses, and an isolated network has none")
+		notApplicable("bandwidth_mbps", bandwidthSet,
+			"an isolated network carries no traffic beyond itself and has no bandwidth to shape")
+	case networkTypeRouted:
+		required("address", addressSet, "a routed network is defined by the range it hands out")
+		notApplicable("capacity", capacitySet, "capacity orders public addresses, and a routed network has none")
+	case networkTypePublic:
+		required("capacity", capacitySet, "a public network is ordered by how many addresses it carries")
+		notApplicable("address", addressSet, "the platform assigns the range of a public network")
+		notApplicable("mask", maskSet, "the platform assigns the range of a public network")
+		notApplicable("enable_dhcp", dhcpSet, "a public network has no DHCP of its own to switch")
+	}
+}
+
 func (r *networkResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan networkModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -154,7 +215,7 @@ func (r *networkResource) Create(ctx context.Context, req resource.CreateRequest
 	locationID := int(plan.LocationID.ValueInt64())
 	netType := plan.Type.ValueString()
 
-	var task *sdk.TaskID
+	var task *sdk.VmwareTaskID
 	var err error
 
 	switch netType {
@@ -224,8 +285,8 @@ func (r *networkResource) Create(ctx context.Context, req resource.CreateRequest
 
 // resolveCreatedNetworkID waits for the create task and returns the resulting
 // network ID from the task payload.
-func (r *networkResource) resolveCreatedNetworkID(ctx context.Context, task *sdk.TaskID) (int, error) {
-	if task == nil || task.ID == "" {
+func (r *networkResource) resolveCreatedNetworkID(ctx context.Context, task *sdk.VmwareTaskID) (int, error) {
+	if task.IsZero() {
 		return 0, fmt.Errorf("API did not return a task id for the create operation")
 	}
 	done, err := r.client.WaitVmwareTask(ctx, task.ID)
@@ -272,6 +333,8 @@ func (r *networkResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	networkID := int(state.ID.ValueInt64())
+	defer locks.VmwareNetwork(networkID)()
+
 	editReq := &entities.VmwareEditNetworkRequest{Name: plan.Name.ValueString()}
 	// bandwidth is only editable for routed/public; isolated rejects it (400).
 	if plan.Type.ValueString() != networkTypeIsolated && !plan.BandwidthMbps.Equal(state.BandwidthMbps) {
@@ -284,7 +347,8 @@ func (r *networkResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Error Updating VMware Network", err.Error())
 		return
 	}
-	if task != nil && task.ID != "" {
+	// EditVmwareNetwork answers a no-op change synchronously, without a task.
+	if !task.IsZero() {
 		if _, err := r.client.WaitVmwareTask(ctx, task.ID); err != nil {
 			resp.Diagnostics.AddError("Error Awaiting VMware Network Update", err.Error())
 			return
@@ -311,19 +375,36 @@ func (r *networkResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	networkID := int(state.ID.ValueInt64())
+	defer locks.VmwareNetwork(networkID)()
+
 	task, err := r.client.DeleteVmwareNetwork(ctx, networkID)
 	if err != nil {
 		if sdk.IsNotFound(err) {
 			return
 		}
+		// The API refuses to delete a network anything is still attached to, and its
+		// message does not say what to detach.
+		if sdk.IsNetworkInUse(err) {
+			resp.Diagnostics.AddError("Error Deleting VMware Network",
+				fmt.Sprintf("Network %d still has servers connected to it: %s\n\n"+
+					"Destroy the vcp_vmware_server_network_attachment resources that use it first. An interface "+
+					"created outside Terraform holds the network too — remove it from the panel.", networkID, err.Error()))
+			return
+		}
 		resp.Diagnostics.AddError("Error Deleting VMware Network", err.Error())
 		return
 	}
-	if task != nil && task.ID != "" {
+	if !task.IsZero() {
 		if _, err := r.client.WaitVmwareTask(ctx, task.ID); err != nil {
 			resp.Diagnostics.AddError("Error Awaiting VMware Network Deletion", err.Error())
 			return
 		}
+	}
+	// The delete task finishes before the network disappears, so wait for the
+	// object to be gone — otherwise a dependent resource (or a re-create of the
+	// same address range) races the backend.
+	if err := r.client.WaitVmwareNetworkGone(ctx, networkID); err != nil {
+		resp.Diagnostics.AddError("Error Awaiting VMware Network Deletion", err.Error())
 	}
 }
 

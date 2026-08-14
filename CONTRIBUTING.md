@@ -73,6 +73,13 @@ Acceptance tests create real, billable cloud resources and require `VCP_API_URL`
 A few tests that check "changing the location forces a replace" also need `VCP_LOCATION_ID_ALT`
 — a second, different location — and skip without it.
 
+VMware Cloud is a separate service with a catalog of its own, so its tests
+(`make testacc-service SERVICE=vmware`) read `VCP_VMWARE_LOCATION_ID` and `VCP_VMWARE_IMAGE_ID`
+rather than the variables above. They size every machine from the `vcp_vmware_locations` and
+`vcp_vmware_images` data sources, so they work against any catalog without hard-coded disk sizes.
+One test orders a public network, which consumes one of the location's free address blocks; it is
+opt-in through `VCP_VMWARE_TEST_PUBLIC_NETWORK=1`.
+
 Everything named `TestAcc*` is skipped unless `TF_ACC=1` is set, which only the `testacc*`
 targets do; `make test` is therefore safe to run against an empty environment. If an acceptance
 run dies half-way, `make sweep` tears down whatever it left in the cloud.

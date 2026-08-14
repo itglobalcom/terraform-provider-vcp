@@ -25,7 +25,7 @@ data "vcp_vmware_images" "in_location" {
 
 ### Optional
 
-- `gpu_only` (Boolean) Return only GPU-enabled images.
+- `gpu` (String) GPU filter: "required" (GPU-only images) or "unsupported" (non-GPU images); omit for all.
 - `location_id` (Number) Filter images by location ID.
 
 ### Read-Only
