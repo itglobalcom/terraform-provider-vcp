@@ -293,10 +293,13 @@ func (r *networkResource) resolveCreatedNetworkID(ctx context.Context, task *sdk
 	if err != nil {
 		return 0, err
 	}
-	if done.NetworkID == nil {
+	// Unified Task model: the created network id is reported via resources[]
+	// (type "network"), not a dedicated network_id field.
+	networkID, ok := done.NetworkID()
+	if !ok {
 		return 0, fmt.Errorf("create task %s completed without a network id", task.ID)
 	}
-	return *done.NetworkID, nil
+	return networkID, nil
 }
 
 func (r *networkResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
