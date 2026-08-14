@@ -43,7 +43,7 @@ Read-Only:
 - `image_id` (Number)
 - `is_power_on` (Boolean)
 - `location_id` (Number)
-- `name` (String)
+- `name` (String) Display name of the server.
 - `nics` (Attributes List) (see [below for nested schema](#nestedatt--servers--nics))
 - `ram_mb` (Number)
 - `state` (String)
@@ -66,6 +66,7 @@ Read-Only:
 
 Read-Only:
 
+- `bandwidth_mbps` (Number)
 - `id` (Number)
 - `ip` (String)
 - `is_primary` (Boolean)

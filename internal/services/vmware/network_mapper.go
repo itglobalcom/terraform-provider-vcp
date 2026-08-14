@@ -33,7 +33,7 @@ func mapNetworkToModel(n *entities.VmwareNetwork) networkModel {
 		Type:       types.StringValue(n.Type),
 		Name:       types.StringValue(n.Name),
 		State:      types.StringValue(n.State),
-		NicsCount:  types.Int64Value(int64(n.NicsCount)),
+		NicsCount:  types.Int64Value(int64(n.NICsCount)),
 		Address:    types.StringNull(),
 		Mask:       types.Int64Null(),
 		Gateway:    types.StringNull(),

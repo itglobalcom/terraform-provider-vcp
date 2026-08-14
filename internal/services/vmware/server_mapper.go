@@ -38,9 +38,12 @@ type serverModel struct {
 	NetworkBandwidthMbps types.Int64  `tfsdk:"network_bandwidth_mbps"`
 	BackupEnabled        types.Bool   `tfsdk:"backup_enabled"`
 	BackupPeriod         types.Int64  `tfsdk:"backup_period"`
-	SSHKeys              types.List   `tfsdk:"ssh_keys"`
+	SSHKeyIDs            types.Set    `tfsdk:"ssh_key_ids"`
 	NeedSysprep          types.Bool   `tfsdk:"need_sysprep"`
 	Gpu                  types.Object `tfsdk:"gpu"`
+	// Volumes are the additional data disks; the boot disk lives in
+	// SystemDiskMB/SystemDiskType. See server_volumes.go.
+	Volumes []serverVolumeModel `tfsdk:"volumes"`
 	// Read-only computed fields.
 	State            types.String `tfsdk:"state"`
 	IsPowerOn        types.Bool   `tfsdk:"is_power_on"`
@@ -62,6 +65,14 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 	m.State = types.StringValue(s.State)
 	m.IsPowerOn = types.BoolValue(s.IsPowerOn)
 	m.Created = types.StringValue(s.Created)
+
+	// SRV-5: the primary interface reports its bandwidth, so network_bandwidth_mbps
+	// is a real reading rather than an echo of the order. A zero means the field
+	// was not populated — keep whatever the caller had instead of recording a
+	// bandwidth no interface can have.
+	if primary := primaryNIC(s.NICs); primary != nil && primary.BandwidthMbps > 0 {
+		m.NetworkBandwidthMbps = types.Int64Value(int64(primary.BandwidthMbps))
+	}
 
 	if s.ComputerName != nil {
 		m.ComputerName = types.StringValue(*s.ComputerName)
@@ -109,4 +120,17 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 		}))
 	}
 	m.Nics = types.ListValueMust(types.ObjectType{AttrTypes: nicAttrTypes}, nics)
+}
+
+// primaryNIC returns the interface a VMware server is always created with — the
+// public one the server resource owns. The interfaces added by
+// vcp_vmware_server_network_attachment and vcp_vmware_server_public_interface are
+// never primary.
+func primaryNIC(nics []entities.VmwareNIC) *entities.VmwareNIC {
+	for i := range nics {
+		if nics[i].IsPrimary {
+			return &nics[i]
+		}
+	}
+	return nil
 }

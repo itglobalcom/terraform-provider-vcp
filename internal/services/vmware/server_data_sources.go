@@ -2,6 +2,9 @@ package vmware
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -54,8 +57,15 @@ func mapServerToDSModel(s *entities.VmwareServer) dsServerModel {
 
 func dsServerAttributes(computedID bool) map[string]schema.Attribute {
 	idAttr := schema.Int64Attribute{Computed: true, Description: "Server ID."}
+	nameAttr := schema.StringAttribute{Computed: true, Description: "Display name of the server."}
 	if !computedID {
-		idAttr = schema.Int64Attribute{Required: true, Description: "Server ID."}
+		// The single-server source is reached either way round: by id, which is what
+		// state and the panel URL carry, or by the display name, which is what a
+		// person actually knows. Exactly one of the two is given.
+		idAttr = schema.Int64Attribute{Optional: true, Computed: true,
+			Description: "Server ID. Give this or name."}
+		nameAttr = schema.StringAttribute{Optional: true, Computed: true,
+			Description: "Display name of the server. Give this or id; the name must be unique."}
 	}
 	gpu := schema.SingleNestedAttribute{
 		Computed: true,
@@ -82,7 +92,7 @@ func dsServerAttributes(computedID bool) map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"id":                 idAttr,
 		"location_id":        schema.Int64Attribute{Computed: true},
-		"name":               schema.StringAttribute{Computed: true},
+		"name":               nameAttr,
 		"computer_name":      schema.StringAttribute{Computed: true},
 		"image_id":           schema.Int64Attribute{Computed: true},
 		"cpu":                schema.Int64Attribute{Computed: true},
@@ -130,13 +140,69 @@ func (d *serverDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	server, err := d.client.GetVmwareServer(ctx, int(cfg.ID.ValueInt64()))
+
+	byID := !cfg.ID.IsNull() && !cfg.ID.IsUnknown()
+	byName := !cfg.Name.IsNull() && !cfg.Name.IsUnknown()
+	switch {
+	case byID && byName:
+		resp.Diagnostics.AddError("Conflicting Attributes",
+			"Give either id or name, not both — they would have to agree, and there is nothing to do if they do not.")
+		return
+	case !byID && !byName:
+		resp.Diagnostics.AddError("Missing Attribute",
+			"Give id or name to say which server to read.")
+		return
+	}
+
+	var (
+		server *entities.VmwareServer
+		err    error
+	)
+	if byID {
+		server, err = d.client.GetVmwareServer(ctx, int(cfg.ID.ValueInt64()))
+	} else {
+		server, err = d.findServerByName(ctx, cfg.Name.ValueString())
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read VMware server", err.Error())
 		return
 	}
+
 	state := mapServerToDSModel(server)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// findServerByName locates a server by its display name. The API has no lookup by
+// name, so this is a scan of the inventory — and a name that matches more than
+// one server is reported rather than resolved arbitrarily.
+func (d *serverDataSource) findServerByName(ctx context.Context, name string) (*entities.VmwareServer, error) {
+	servers, err := d.client.GetVmwareServerList(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var found []*entities.VmwareServer
+	for _, server := range servers {
+		if server != nil && server.Name == name {
+			found = append(found, server)
+		}
+	}
+
+	switch len(found) {
+	case 0:
+		return nil, fmt.Errorf("no VMware server is named %q", name)
+	case 1:
+		// The list omits the fields only a by-id read carries (SRV-4:
+		// vm_tools_installed), so fetch the server itself now that the id is known.
+		return d.client.GetVmwareServer(ctx, found[0].ID)
+	default:
+		ids := make([]string, 0, len(found))
+		for _, server := range found {
+			ids = append(ids, strconv.Itoa(server.ID))
+		}
+		return nil, fmt.Errorf("%d VMware servers are named %q (ids %s) — read one of them by id instead",
+			len(found), name, strings.Join(ids, ", "))
+	}
 }
 
 // ===================== Server list =====================
