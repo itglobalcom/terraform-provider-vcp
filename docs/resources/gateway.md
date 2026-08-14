@@ -5,6 +5,7 @@ subcategory: ""
 description: |-
   Manages an edge gateway providing external connectivity to isolated networks.
   The external (WAN) interface is intrinsic to the gateway: bandwidth_mbps is a gateway-wide property that must be set at creation. The gateway itself has no network arguments — attach isolated networks with the vcp_gateway_network_attachment resource.
+  The rest of the gateway configuration lives in its own resources, each owning the whole list it manages: vcp_gateway_nat for NAT rules and vcp_gateway_firewall for firewall rules. Both need the gateway's external address, which this resource exposes as public_ip.
 ---
 
 # vcp_gateway (Resource)
@@ -12,6 +13,8 @@ description: |-
 Manages an edge gateway providing external connectivity to isolated networks.
 
 The external (WAN) interface is intrinsic to the gateway: `bandwidth_mbps` is a gateway-wide property that must be set at creation. The gateway itself has no network arguments — attach isolated networks with the `vcp_gateway_network_attachment` resource.
+
+The rest of the gateway configuration lives in its own resources, each owning the whole list it manages: `vcp_gateway_nat` for NAT rules and `vcp_gateway_firewall` for firewall rules. Both need the gateway's external address, which this resource exposes as `public_ip`.
 
 ## Example Usage
 
@@ -46,6 +49,7 @@ resource "vcp_gateway" "example" {
 - `created` (String) Creation timestamp.
 - `id` (String) Gateway ID.
 - `powered_on` (Boolean) Whether the gateway is powered on.
+- `public_ip` (String) Address of the external (WAN) interface. Every NAT rule has to name it — `destination` for `DNAT`, `translated` for `SNAT`/`BINAT` (see `vcp_gateway_nat`).
 - `state` (String) Gateway state (New, Active, Busy, Blocked).
 
 ## Import

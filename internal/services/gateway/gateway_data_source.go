@@ -71,6 +71,8 @@ func (d *gatewayDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			},
 			"isolated_net_nics": isolatedNICsDataSchema(),
 			"public_net_nics":   publicNICsDataSchema(),
+			"nat_rules":         natRulesDataSchema(),
+			"firewall_rules":    firewallRulesDataSchema(),
 			"state":             schema.StringAttribute{Computed: true, MarkdownDescription: "Gateway state."},
 			"powered_on":        schema.BoolAttribute{Computed: true, MarkdownDescription: "Whether the gateway is powered on."},
 			"created":           schema.StringAttribute{Computed: true, MarkdownDescription: "Creation timestamp."},

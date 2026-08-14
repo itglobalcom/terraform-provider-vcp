@@ -68,6 +68,28 @@ func TestGatewayNICs_wanBandwidth(t *testing.T) {
 	}
 }
 
+// TestGatewayNICs_wanIP — the external address published as public_ip. Every
+// NAT rule has to name it, so a gateway without a WAN NIC must yield null
+// rather than an empty string that would be sent to the API verbatim.
+func TestGatewayNICs_wanIP(t *testing.T) {
+	gw := &entities.Gateway{
+		NICs: []entities.GatewayNIC{
+			{ID: 1, NetworkID: "netA", IPAddress: "10.0.0.2"},
+			{ID: 2, NetworkID: "wan-sys", IPAddress: "203.0.113.5", BandwidthMbps: 250},
+		},
+	}
+	if got := wanIP(gw); got.ValueString() != "203.0.113.5" {
+		t.Errorf("wanIP = %q, want 203.0.113.5", got.ValueString())
+	}
+
+	gwNoWAN := &entities.Gateway{
+		NICs: []entities.GatewayNIC{{ID: 1, NetworkID: "netA", IPAddress: "10.0.0.2"}},
+	}
+	if got := wanIP(gwNoWAN); !got.IsNull() {
+		t.Errorf("wanIP without a WAN NIC = %q, want null", got.ValueString())
+	}
+}
+
 func TestGatewayNICs_isPrivateIP(t *testing.T) {
 	cases := map[string]bool{
 		"10.0.0.2":    true,

@@ -29,13 +29,29 @@ data "vcp_gateway" "example" {
 ### Read-Only
 
 - `created` (String) Creation timestamp.
+- `firewall_rules` (Attributes List) Firewall rules of the gateway, in evaluation order — the **last** matching rule wins. (see [below for nested schema](#nestedatt--firewall_rules))
 - `isolated_net_nics` (Attributes List) Isolated networks connected to the gateway. (see [below for nested schema](#nestedatt--isolated_net_nics))
 - `location_id` (String) Location ID.
 - `name` (String) Gateway name.
+- `nat_rules` (Attributes List) NAT rules of the gateway, in the order the API stores them (which rule wins when several of them match is not specified by the API documentation). (see [below for nested schema](#nestedatt--nat_rules))
 - `powered_on` (Boolean) Whether the gateway is powered on.
 - `public_net_nics` (Attributes List) External (WAN) interfaces of the gateway. (see [below for nested schema](#nestedatt--public_net_nics))
 - `state` (String) Gateway state.
 - `tags` (Set of String) Set of tags.
+
+<a id="nestedatt--firewall_rules"></a>
+### Nested Schema for `firewall_rules`
+
+Read-Only:
+
+- `action` (String) Action (Allow, Deny).
+- `destination` (String) Destination in CIDR notation.
+- `destination_port` (Number) Destination port (0 = any).
+- `direction` (String) Direction (In, Out).
+- `protocol` (String) Protocol (TCP, UDP, ICMP, IP).
+- `source` (String) Source in CIDR notation.
+- `source_port` (Number) Source port (0 = any).
+
 
 <a id="nestedatt--isolated_net_nics"></a>
 ### Nested Schema for `isolated_net_nics`
@@ -45,6 +61,20 @@ Read-Only:
 - `id` (Number) NIC ID.
 - `ip_address` (String) IP address assigned on the network.
 - `network_id` (String) Connected isolated network ID.
+
+
+<a id="nestedatt--nat_rules"></a>
+### Nested Schema for `nat_rules`
+
+Read-Only:
+
+- `destination` (String) Destination in CIDR notation.
+- `destination_port` (Number) Destination port (0 = any).
+- `protocol` (String) Protocol (TCP, UDP, ICMP, IP).
+- `source` (String) Source in CIDR notation.
+- `translated` (String) Address the traffic is translated to.
+- `translated_port` (Number) Port after translation (0 = any).
+- `type` (String) Rule type (SNAT, DNAT, BINAT).
 
 
 <a id="nestedatt--public_net_nics"></a>

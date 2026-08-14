@@ -18,6 +18,7 @@ import (
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/dns"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/gateway"
 	gateway_attachment "github.com/itglobalcom/terraform-provider-vcp/internal/services/gateway_network_attachment"
+	gateway_rules "github.com/itglobalcom/terraform-provider-vcp/internal/services/gateway_rules"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/isolated_network"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/metadata"
 	vstack_server "github.com/itglobalcom/terraform-provider-vcp/internal/services/server"
@@ -218,6 +219,8 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		server_pubif.NewResource,
 		server_attachment.NewResource,
 		gateway_attachment.NewResource,
+		gateway_rules.NewNATResource,
+		gateway_rules.NewFirewallResource,
 		dns.NewDomainResource,
 		dns.NewRecordSetResource,
 	}

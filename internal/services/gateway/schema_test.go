@@ -15,7 +15,7 @@ func TestGatewayResourceSchema(t *testing.T) {
 
 	for _, name := range []string{
 		"id", "location_id", "name", "tags",
-		"bandwidth_mbps",
+		"bandwidth_mbps", "public_ip",
 		"state", "powered_on", "created",
 	} {
 		if _, ok := attrs[name]; !ok {
@@ -38,5 +38,12 @@ func TestGatewayResourceSchema(t *testing.T) {
 
 	if a := attrs["bandwidth_mbps"]; a == nil || !a.IsRequired() {
 		t.Error(`"bandwidth_mbps" must be Required`)
+	}
+
+	// public_ip is read from the WAN NIC. Every NAT rule has to name this
+	// address, so the resource must expose it without forcing users through a
+	// data source on their own gateway.
+	if a := attrs["public_ip"]; a == nil || !a.IsComputed() || a.IsRequired() || a.IsOptional() {
+		t.Error(`"public_ip" must be Computed only`)
 	}
 }

@@ -20,6 +20,7 @@ type gatewayModel struct {
 	Name          types.String `tfsdk:"name"`
 	Tags          types.Set    `tfsdk:"tags"`
 	BandwidthMbps types.Int64  `tfsdk:"bandwidth_mbps"`
+	PublicIP      types.String `tfsdk:"public_ip"`
 	State         types.String `tfsdk:"state"`
 	PoweredOn     types.Bool   `tfsdk:"powered_on"`
 	Created       types.String `tfsdk:"created"`
@@ -35,6 +36,7 @@ func mapGatewayScalars(gw *entities.Gateway) gatewayModel {
 		LocationID: types.StringValue(gw.LocationID),
 		Name:       types.StringValue(gw.Name),
 		Tags:       tagsSet(gw),
+		PublicIP:   wanIP(gw),
 		State:      types.StringValue(gw.State),
 		PoweredOn:  types.BoolValue(gw.PoweredOn),
 		Created:    types.StringValue(gw.Created),
@@ -48,15 +50,17 @@ func mapGatewayScalars(gw *entities.Gateway) gatewayModel {
 // gatewayDataModel — a read-only reflection of the gateway: lists all NICs,
 // split into isolated/public by IP type (the data source has no config).
 type gatewayDataModel struct {
-	ID              types.String       `tfsdk:"id"`
-	LocationID      types.String       `tfsdk:"location_id"`
-	Name            types.String       `tfsdk:"name"`
-	Tags            types.Set          `tfsdk:"tags"`
-	IsolatedNetNICs []isolatedNICModel `tfsdk:"isolated_net_nics"`
-	PublicNetNICs   []publicNICModel   `tfsdk:"public_net_nics"`
-	State           types.String       `tfsdk:"state"`
-	PoweredOn       types.Bool         `tfsdk:"powered_on"`
-	Created         types.String       `tfsdk:"created"`
+	ID              types.String            `tfsdk:"id"`
+	LocationID      types.String            `tfsdk:"location_id"`
+	Name            types.String            `tfsdk:"name"`
+	Tags            types.Set               `tfsdk:"tags"`
+	IsolatedNetNICs []isolatedNICModel      `tfsdk:"isolated_net_nics"`
+	PublicNetNICs   []publicNICModel        `tfsdk:"public_net_nics"`
+	NATRules        []natRuleDataModel      `tfsdk:"nat_rules"`
+	FirewallRules   []firewallRuleDataModel `tfsdk:"firewall_rules"`
+	State           types.String            `tfsdk:"state"`
+	PoweredOn       types.Bool              `tfsdk:"powered_on"`
+	Created         types.String            `tfsdk:"created"`
 }
 
 // tagsSet — the set of gateway tags.
@@ -77,6 +81,8 @@ func mapGatewayToDataModel(gw *entities.Gateway) gatewayDataModel {
 		Tags:            tagsSet(gw),
 		IsolatedNetNICs: iso,
 		PublicNetNICs:   pub,
+		NATRules:        flattenNATRulesData(gw.NATRules),
+		FirewallRules:   flattenFirewallRulesData(gw.FirewallRules),
 		State:           types.StringValue(gw.State),
 		PoweredOn:       types.BoolValue(gw.PoweredOn),
 		Created:         types.StringValue(gw.Created),

@@ -109,10 +109,92 @@ resource "vcp_server_network_attachment" "db_back" {
 }
 
 # ============================================================================
+# NAT: outbound internet for the app tier, plus one published service.
+#
+# Both resources own the ENTIRE rule set of the gateway — the API replaces the
+# whole list on every change. gateway_id points at the attachment rather than at
+# the gateway so the rules are applied only once app-net is connected.
+# ============================================================================
+locals {
+  app_cidr = "${vcp_network.app.network_prefix}/${vcp_network.app.mask}"
+  app1_ip  = vcp_server_network_attachment.app_front["app1"].ip_address
+}
+
+resource "vcp_gateway_nat" "gw" {
+  gateway_id = vcp_gateway_network_attachment.gw_app.gateway_id
+
+  rules = [
+    # Publish HTTPS on the gateway's external address → app1:8443.
+    {
+      type             = "DNAT"
+      protocol         = "TCP"
+      source           = "0.0.0.0/0"
+      destination      = "${vcp_gateway.gw.public_ip}/32"
+      destination_port = 443
+      translated       = local.app1_ip
+      translated_port  = 8443
+    },
+    # Outbound internet for the whole app tier. protocol = "IP" is any protocol,
+    # and then both ports must stay 0 — hence omitted.
+    {
+      type        = "SNAT"
+      protocol    = "IP"
+      source      = local.app_cidr
+      destination = "0.0.0.0/0"
+      translated  = vcp_gateway.gw.public_ip
+    },
+  ]
+}
+
+# ============================================================================
+# Firewall: deny by default, then open exactly what is needed.
+#
+# The LAST matching rule wins, so the catch-all deny goes first and the specific
+# allow rules below it. db-net is not attached to the gateway at all, so the
+# database has no path in or out regardless of these rules.
+# ============================================================================
+resource "vcp_gateway_firewall" "gw" {
+  gateway_id = vcp_gateway_network_attachment.gw_app.gateway_id
+
+  rules = [
+    { action = "Deny", direction = "In", protocol = "IP", source = "0.0.0.0/0", destination = "0.0.0.0/0" },
+    { action = "Deny", direction = "Out", protocol = "IP", source = "0.0.0.0/0", destination = "0.0.0.0/0" },
+
+    # The published service — after DNAT the destination is already private.
+    {
+      action           = "Allow"
+      direction        = "In"
+      protocol         = "TCP"
+      source           = "0.0.0.0/0"
+      destination      = "${local.app1_ip}/32"
+      destination_port = 8443
+    },
+    # Outbound traffic from the app tier.
+    {
+      action      = "Allow"
+      direction   = "Out"
+      protocol    = "IP"
+      source      = local.app_cidr
+      destination = "0.0.0.0/0"
+    },
+  ]
+}
+
+# ============================================================================
 # Outputs
 # ============================================================================
 output "gateway_id" {
   value = vcp_gateway.gw.id
+}
+
+output "gateway_public_ip" {
+  description = "External address of the gateway — the address NAT rules translate to"
+  value       = vcp_gateway.gw.public_ip
+}
+
+output "published_https" {
+  description = "Where the published service answers"
+  value       = "https://${vcp_gateway.gw.public_ip}:443 -> ${local.app1_ip}:8443"
 }
 
 output "app_server_ids" {

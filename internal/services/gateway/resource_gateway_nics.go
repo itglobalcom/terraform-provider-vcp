@@ -60,6 +60,20 @@ func flattenGatewayNICs(gw *entities.Gateway) ([]isolatedNICModel, []publicNICMo
 	return iso, pub
 }
 
+// wanIP returns the address of the external (WAN) interface — the first NIC
+// with a public IP. Every NAT rule has to name this address (the API requires
+// it in `destination` for DNAT and in `translated` for SNAT/BINAT), so the
+// gateway publishes it as a computed attribute. Null if the gateway has no
+// public NIC.
+func wanIP(gw *entities.Gateway) types.String {
+	for _, n := range gw.NICs {
+		if !isPrivateIP(n.IPAddress) && n.IPAddress != "" {
+			return types.StringValue(n.IPAddress)
+		}
+	}
+	return types.StringNull()
+}
+
 // wanBandwidth returns the actual bandwidth of the external (WAN) interface
 // from the API — the NIC with a public IP. Used in the resource's Read for
 // drift detection: if bandwidth was changed outside Terraform, the plan will

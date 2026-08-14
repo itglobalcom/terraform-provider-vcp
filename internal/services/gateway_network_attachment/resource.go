@@ -191,9 +191,9 @@ func (r *attachmentResource) Delete(ctx context.Context, req resource.DeleteRequ
 	nicID := int(state.ID.ValueInt64())
 	defer locks.Gateway(gwID)()
 
-	// The backend answers HTTP 500 (not 404) when disconnecting a NIC that is
-	// already gone, so always probe first: a missing gateway or NIC means
-	// there is nothing to disconnect.
+	// A missing gateway or NIC means there is nothing to disconnect. The SDK
+	// reports an already-gone NIC as not-found (the API answers HTTP 500 there),
+	// but probing first also gives us the NIC id when state lost it.
 	gw, err := r.client.GetGateway(ctx, gwID)
 	if err != nil {
 		if sdk.IsNotFound(err) {

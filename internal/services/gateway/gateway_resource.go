@@ -48,7 +48,10 @@ func (r *gatewayResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		MarkdownDescription: "Manages an edge gateway providing external connectivity to isolated networks.\n\n" +
 			"The external (WAN) interface is intrinsic to the gateway: `bandwidth_mbps` is a gateway-wide " +
 			"property that must be set at creation. The gateway itself has no network arguments — attach " +
-			"isolated networks with the `vcp_gateway_network_attachment` resource.",
+			"isolated networks with the `vcp_gateway_network_attachment` resource.\n\n" +
+			"The rest of the gateway configuration lives in its own resources, each owning the whole list it " +
+			"manages: `vcp_gateway_nat` for NAT rules and `vcp_gateway_firewall` for firewall rules. Both need " +
+			"the gateway's external address, which this resource exposes as `public_ip`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Gateway ID.",
@@ -78,6 +81,13 @@ func (r *gatewayResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					types.SetValueMust(types.StringType, []attr.Value{}),
 				),
 				PlanModifiers: []planmodifier.Set{setplanmodifier.UseStateForUnknown()},
+			},
+
+			"public_ip": schema.StringAttribute{
+				MarkdownDescription: "Address of the external (WAN) interface. Every NAT rule has to name it — " +
+					"`destination` for `DNAT`, `translated` for `SNAT`/`BINAT` (see `vcp_gateway_nat`).",
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 
 			// Computed (changes on update → no UseStateForUnknown).
@@ -351,13 +361,16 @@ func (r *gatewayResource) Delete(ctx context.Context, req resource.DeleteRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.client.DeleteGateway(ctx, state.ID.ValueString()); err != nil {
+	id := state.ID.ValueString()
+	if err := r.client.DeleteGateway(ctx, id); err != nil {
+		// A gateway that is already gone is reported as not-found by the SDK,
+		// even though the API answers HTTP 500 in that case.
 		if sdk.IsNotFound(err) {
-			tflog.Info(ctx, "Gateway already deleted, treating as success", map[string]any{"id": state.ID.ValueString()})
+			tflog.Info(ctx, "Gateway already deleted, treating as success", map[string]any{"id": id})
 			return
 		}
 		resp.Diagnostics.AddError("Error Deleting Gateway",
-			fmt.Sprintf("Could not delete gateway %s: %s", state.ID.ValueString(), err.Error()))
+			fmt.Sprintf("Could not delete gateway %s: %s", id, err.Error()))
 	}
 }
 

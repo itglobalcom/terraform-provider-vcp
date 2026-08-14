@@ -19,6 +19,10 @@ import (
 // singular one mirrors the resource and classifies NICs by IP — the attached
 // isolated network lands in isolated_net_nics, the WAN NIC (with the gateway
 // bandwidth) in public_net_nics; the plural one includes the created gateway.
+//
+// It also covers the rule lists the data sources expose. Those are flattened by
+// their own code, separate from the vcp_gateway_nat / vcp_gateway_firewall
+// resources, so the rules are applied here and read back through the data source.
 func TestAccGatewayDataSource_basic(t *testing.T) {
 	resourceName := "vcp_gateway.test"
 	dataSourceName := "data.vcp_gateway.test"
@@ -42,13 +46,52 @@ resource "vcp_gateway_network_attachment" "test" {
   network_id = vcp_network.test.id
 }
 
+resource "vcp_gateway_nat" "test" {
+  gateway_id = vcp_gateway.test.id
+
+  rules = [
+    {
+      type        = "SNAT"
+      protocol    = "IP"
+      source      = "10.0.0.0/8"
+      destination = "0.0.0.0/0"
+      translated  = vcp_gateway.test.public_ip
+    },
+  ]
+}
+
+resource "vcp_gateway_firewall" "test" {
+  gateway_id = vcp_gateway.test.id
+
+  rules = [
+    { action = "Deny", direction = "In", protocol = "IP", source = "0.0.0.0/0", destination = "0.0.0.0/0" },
+    {
+      action           = "Allow"
+      direction        = "In"
+      protocol         = "TCP"
+      source           = "192.0.2.0/24"
+      source_port      = 1024
+      destination      = "10.0.0.0/8"
+      destination_port = 8443
+    },
+  ]
+}
+
 data "vcp_gateway" "test" {
-  id         = vcp_gateway.test.id
-  depends_on = [vcp_gateway_network_attachment.test]
+  id = vcp_gateway.test.id
+  depends_on = [
+    vcp_gateway_network_attachment.test,
+    vcp_gateway_nat.test,
+    vcp_gateway_firewall.test,
+  ]
 }
 
 data "vcp_gateways" "all" {
-  depends_on = [vcp_gateway_network_attachment.test]
+  depends_on = [
+    vcp_gateway_network_attachment.test,
+    vcp_gateway_nat.test,
+    vcp_gateway_firewall.test,
+  ]
 }
 `, gwName+"-net", locationID, gwName, locationID)
 
@@ -88,6 +131,41 @@ data "vcp_gateways" "all" {
 						tfjsonpath.New("public_net_nics").AtSliceIndex(0).AtMapKey("bandwidth_mbps"),
 						knownvalue.Int64Exact(100),
 					),
+					// The rule lists come from the data source's own flatten code:
+					// check the values, not just the sizes, and check the order —
+					// for firewall rules the last match is the one that wins.
+					statecheck.ExpectKnownValue(dataSourceName, tfjsonpath.New("nat_rules"), knownvalue.ListSizeExact(1)),
+					statecheck.ExpectKnownValue(dataSourceName,
+						tfjsonpath.New("nat_rules").AtSliceIndex(0), knownvalue.ObjectPartial(map[string]knownvalue.Check{
+							"type":             knownvalue.StringExact("SNAT"),
+							"protocol":         knownvalue.StringExact("IP"),
+							"source":           knownvalue.StringExact("10.0.0.0/8"),
+							"destination":      knownvalue.StringExact("0.0.0.0/0"),
+							"destination_port": knownvalue.Int64Exact(0),
+							"translated_port":  knownvalue.Int64Exact(0),
+						})),
+					statecheck.CompareValuePairs(
+						dataSourceName, tfjsonpath.New("nat_rules").AtSliceIndex(0).AtMapKey("translated"),
+						resourceName, tfjsonpath.New("public_ip"),
+						compare.ValuesSame(),
+					),
+					statecheck.ExpectKnownValue(dataSourceName, tfjsonpath.New("firewall_rules"), knownvalue.ListSizeExact(2)),
+					statecheck.ExpectKnownValue(dataSourceName,
+						tfjsonpath.New("firewall_rules").AtSliceIndex(0), knownvalue.ObjectPartial(map[string]knownvalue.Check{
+							"action":    knownvalue.StringExact("Deny"),
+							"direction": knownvalue.StringExact("In"),
+							"protocol":  knownvalue.StringExact("IP"),
+						})),
+					statecheck.ExpectKnownValue(dataSourceName,
+						tfjsonpath.New("firewall_rules").AtSliceIndex(1), knownvalue.ObjectPartial(map[string]knownvalue.Check{
+							"action":           knownvalue.StringExact("Allow"),
+							"protocol":         knownvalue.StringExact("TCP"),
+							"source":           knownvalue.StringExact("192.0.2.0/24"),
+							"source_port":      knownvalue.Int64Exact(1024),
+							"destination":      knownvalue.StringExact("10.0.0.0/8"),
+							"destination_port": knownvalue.Int64Exact(8443),
+						})),
+
 					// Plural data source includes the created gateway.
 					acctest.CheckListNotEmpty("data.vcp_gateways.all", "gateways"),
 					checkGatewayInList{
