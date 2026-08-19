@@ -46,6 +46,20 @@ func init() {
 		F:            SweepAffinityGroups,
 	})
 
+	// VMware is a separate service with its own objects: its servers and networks
+	// are not in the vStack lists, so they need sweepers of their own.
+	resource.AddTestSweepers("vcp_vmware_server", &resource.Sweeper{
+		Name: "vcp_vmware_server",
+		F:    SweepVmwareServers,
+	})
+
+	// A VMware network cannot be deleted while an interface is on it (-19511).
+	resource.AddTestSweepers("vcp_vmware_network", &resource.Sweeper{
+		Name:         "vcp_vmware_network",
+		Dependencies: []string{"vcp_vmware_server"},
+		F:            SweepVmwareNetworks,
+	})
+
 	// DNS zones are independent; deleting a zone cascades to remove its records.
 	resource.AddTestSweepers("vcp_dns_domain", &resource.Sweeper{
 		Name: "vcp_dns_domain",
