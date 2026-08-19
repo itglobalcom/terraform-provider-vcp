@@ -387,7 +387,7 @@ func (r *networkResource) Delete(ctx context.Context, req resource.DeleteRequest
 		}
 		// The API refuses to delete a network anything is still attached to, and its
 		// message does not say what to detach.
-		if sdk.IsNetworkInUse(err) {
+		if sdk.HasAPICode(err, sdk.APICodeNetworkInUse) {
 			resp.Diagnostics.AddError("Error Deleting VMware Network",
 				fmt.Sprintf("Network %d still has servers connected to it: %s\n\n"+
 					"Destroy the vcp_vmware_server_network_attachment resources that use it first. An interface "+
