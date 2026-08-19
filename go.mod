@@ -7,7 +7,7 @@ toolchain go1.25.12
 require (
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
-	github.com/itglobalcom/vstack-cloud-panel-sdk v1.1.0
+	github.com/itglobalcom/vstack-cloud-panel-sdk v1.1.2
 )
 
 require (
