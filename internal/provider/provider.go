@@ -25,6 +25,7 @@ import (
 	server_attachment "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_network_attachment"
 	server_pubif "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_public_interface"
 	ssh_key "github.com/itglobalcom/terraform-provider-vcp/internal/services/ssh_key"
+	"github.com/itglobalcom/terraform-provider-vcp/internal/services/vmware"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
 )
 
@@ -60,7 +61,8 @@ func (p *CloudProvider) Metadata(ctx context.Context, req provider.MetadataReque
 func (p *CloudProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "The VStack Cloud Panel (`vcp`) provider manages VStack Cloud Panel resources — " +
-			"servers, isolated networks, gateways, DNS zones, SSH keys, and affinity groups. " +
+			"servers, isolated networks, gateways, DNS zones, SSH keys, and affinity groups, " +
+			"as well as VMware Cloud servers and networks (`vcp_vmware_*`). " +
 			"Configure it with an API endpoint (`host`) and token (`key`), or the `VCP_API_URL` / " +
 			"`VCP_API_TOKEN` environment variables.",
 		Attributes: map[string]schema.Attribute{
@@ -223,6 +225,14 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		gateway_rules.NewFirewallResource,
 		dns.NewDomainResource,
 		dns.NewRecordSetResource,
+		vmware.NewNetworkResource,
+		vmware.NewServerResource,
+		vmware.NewServerNetworkAttachmentResource,
+		vmware.NewServerPublicInterfaceResource,
+		vmware.NewServerFirewallResource,
+		vmware.NewEdgeFirewallResource,
+		vmware.NewEdgeNATResource,
+		vmware.NewEdgeVPNTunnelResource,
 	}
 }
 
@@ -245,5 +255,12 @@ func (p *CloudProvider) DataSources(ctx context.Context) []func() datasource.Dat
 		gateway.NewGatewaysDataSource,
 		dns.NewDomainDataSource,
 		dns.NewDomainsDataSource,
+		vmware.NewLocationsDataSource,
+		vmware.NewImagesDataSource,
+		vmware.NewGpuModelsDataSource,
+		vmware.NewServerDataSource,
+		vmware.NewServersDataSource,
+		vmware.NewNetworkDataSource,
+		vmware.NewNetworksDataSource,
 	}
 }

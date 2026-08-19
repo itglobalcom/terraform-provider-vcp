@@ -39,7 +39,7 @@ export TF_ACC_TERRAFORM_PATH
 .PHONY: help build release install-filesystem setup-terraformrc-filesystem setup \
         dev-setup check-release deps fmt vet lint tools clean clean-all \
         test testacc testacc-service testacc-test \
-        sweep docs-generate docs-validate
+        sweep validate-configs docs-generate docs-validate
 
 help: ## Show the list of targets
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -125,22 +125,38 @@ test: ## Unit tests (no cloud calls, no credentials needed)
 # ── Acceptance tests (need VCP_* env; see .env.example) ────
 # -p 1: run test packages serially — all packages share one cloud account,
 # parallel apply/destroy across services trips backend quotas and races.
+# Ordering a machine takes minutes, and the VMware suite orders a good many of
+# them, so the whole run needs hours rather than the two the rest of the services
+# fit into. Override with TESTACC_TIMEOUT=… for a shorter slice.
+TESTACC_TIMEOUT ?= 300m
+
 testacc: ## All acceptance tests
-	TF_ACC=1 go test $(if $(TEST),$(TEST),./...) -v -p 1 $(TESTARGS) -timeout 120m
+	TF_ACC=1 go test $(if $(TEST),$(TEST),./...) -v -p 1 $(TESTARGS) -timeout $(TESTACC_TIMEOUT)
 
 testacc-service: ## Tests for a single service (SERVICE=…)
 	@test -n "$(SERVICE)" || { echo "usage: make testacc-service SERVICE=server"; exit 1; }
-	TF_ACC=1 go test $(SERVICES_DIR)/$(SERVICE) -v -timeout 120m
+	TF_ACC=1 go test $(SERVICES_DIR)/$(SERVICE) -v -timeout $(TESTACC_TIMEOUT)
 
 testacc-test: ## A single test (SERVICE=… TEST=…)
 	@test -n "$(SERVICE)" -a -n "$(TEST)" || { echo "usage: make testacc-test SERVICE=server TEST=TestAccServer_basic"; exit 1; }
-	TF_ACC=1 go test $(SERVICES_DIR)/$(SERVICE) -v -run $(TEST) -timeout 120m
+	TF_ACC=1 go test $(SERVICES_DIR)/$(SERVICE) -v -run $(TEST) -timeout $(TESTACC_TIMEOUT)
 
 # ── Sweepers (delete leftover test resources by name prefix test-acc-*/tf-acc-*) ──
 # make sweep                        — tear down all test resources
 # make sweep SWEEP_RUN=vcp_server   — servers only (names: vcp_server, vcp_network)
 sweep: ## Tear down test resources (SWEEP_RUN=vcp_server — servers only)
 	TF_ACC=1 go test ./internal/acctest -v -timeout $(SWEEP_TIMEOUT) -sweep=all $(if $(SWEEP_RUN),-sweep-run=$(SWEEP_RUN),) $(SWEEPARGS)
+
+# ── Configuration validation ───────────────────────────────
+# Runs the real Terraform against the locally built provider, so every example
+# and every acceptance configuration is checked against the actual schema: an
+# attribute that does not exist, a value of the wrong type, an enum outside its
+# set and a ValidateConfig rule all fail here. `go test` only parses the HCL.
+#
+# Needs the terraform CLI. No credentials and no cloud calls — validate never
+# reaches the API.
+validate-configs: build ## terraform validate on every example and acceptance config
+	@./scripts/validate-configs.sh
 
 # ── Docs ───────────────────────────────────────────────────
 docs-generate: $(BIN_DIR)/tfplugindocs ## tfplugindocs generate

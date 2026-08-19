@@ -369,6 +369,109 @@ func SweepDomains(region string) error {
 	return nil
 }
 
+// SweepVmwareServers deletes test VMware servers (matched by the test-* name
+// prefix). Deletion is asynchronous and the task finishes before the object
+// disappears, so this waits: the network sweeper runs afterwards and a server
+// that is still around holds its networks.
+func SweepVmwareServers(region string) error {
+	log.Printf("[INFO] Starting sweep of VMware servers")
+
+	client := GetTestClient()
+	ctx := context.Background()
+
+	servers, err := client.GetVmwareServerList(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error listing VMware servers: %w", err)
+	}
+
+	var testServers []*entities.VmwareServer
+	for _, server := range servers {
+		if !isTestResourceName(server.Name) {
+			log.Printf("[DEBUG] Skipping VMware server: %s (not a test server)", server.Name)
+			continue
+		}
+		testServers = append(testServers, server)
+	}
+
+	if len(testServers) == 0 {
+		log.Print("[INFO] No test VMware servers found to sweep")
+		return nil
+	}
+
+	var sweeperErrors []error
+	for i, server := range testServers {
+		log.Printf("[INFO] [%d/%d] Deleting test VMware server: %s (ID: %d, state: %s)",
+			i+1, len(testServers), server.Name, server.ID, server.State)
+
+		if err := client.DeleteVmwareServerAndWait(ctx, server.ID); err != nil && !sdk.IsNotFound(err) {
+			sweeperError := fmt.Errorf("error deleting VMware server %s (%d): %w", server.Name, server.ID, err)
+			log.Printf("[ERROR] %s", sweeperError)
+			sweeperErrors = append(sweeperErrors, sweeperError)
+			continue
+		}
+
+		log.Printf("[INFO] ✓ Successfully deleted VMware server: %s (ID: %d)", server.Name, server.ID)
+	}
+
+	if len(sweeperErrors) > 0 {
+		return fmt.Errorf("encountered %d errors during VMware server sweep: %v", len(sweeperErrors), sweeperErrors)
+	}
+
+	log.Printf("[INFO] VMware server sweep completed successfully")
+	return nil
+}
+
+// SweepVmwareNetworks deletes test VMware networks (matched by the test-* name
+// prefix). Runs after the server sweeper: a network with an interface on it
+// cannot be deleted (-19511).
+func SweepVmwareNetworks(region string) error {
+	log.Printf("[INFO] Starting sweep of VMware networks")
+
+	client := GetTestClient()
+	ctx := context.Background()
+
+	networks, err := client.GetVmwareNetworkList(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error listing VMware networks: %w", err)
+	}
+
+	var testNetworks []*entities.VmwareNetwork
+	for _, network := range networks {
+		if !isTestResourceName(network.Name) {
+			log.Printf("[DEBUG] Skipping VMware network: %s (not a test network)", network.Name)
+			continue
+		}
+		testNetworks = append(testNetworks, network)
+	}
+
+	if len(testNetworks) == 0 {
+		log.Print("[INFO] No test VMware networks found to sweep")
+		return nil
+	}
+
+	var sweeperErrors []error
+	for i, network := range testNetworks {
+		log.Printf("[INFO] [%d/%d] Deleting test VMware network: %s (ID: %d, NICs: %d)",
+			i+1, len(testNetworks), network.Name, network.ID, network.NICsCount)
+
+		if err := client.DeleteVmwareNetworkAndWait(ctx, network.ID); err != nil && !sdk.IsNotFound(err) {
+			sweeperError := fmt.Errorf("error deleting VMware network %s (%d): %w", network.Name, network.ID, err)
+			log.Printf("[ERROR] %s", sweeperError)
+			sweeperErrors = append(sweeperErrors, sweeperError)
+			continue
+		}
+
+		log.Printf("[INFO] ✓ Successfully deleted VMware network: %s (ID: %d)", network.Name, network.ID)
+	}
+
+	if len(sweeperErrors) > 0 {
+		return fmt.Errorf("encountered %d errors during VMware network sweep: %v", len(sweeperErrors), sweeperErrors)
+	}
+
+	log.Printf("[INFO] VMware network sweep completed successfully")
+	return nil
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
