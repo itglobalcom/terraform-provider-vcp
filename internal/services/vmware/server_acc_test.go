@@ -228,6 +228,89 @@ func TestAccVmwareServer_disappears(t *testing.T) {
 	})
 }
 
+// TestAccVmwareServer_nestedHypervisor covers the life of one setting: ordered
+// with it on, switched off in place on the machine that is already there,
+// imported, and changed in the panel behind Terraform's back.
+//
+// The step that matters most is the second one. `nested_hypervisor` is
+// Optional+Computed, and an Optional+Computed attribute without
+// UseStateForUnknown plans as "known after apply" on every single run — an
+// endless diff on a machine nobody touched. On this attribute a diff is not
+// cosmetic: applying it power-cycles the guest.
+//
+// The third step is the other half: the platform edits the setting on the machine
+// it is already on, so a plan that replaced the server would destroy the disk to
+// change a checkbox. The id is asserted to be the same one afterwards, because a
+// plan check alone would not notice a replacement the provider carried out for
+// some other reason.
+func TestAccVmwareServer_nestedHypervisor(t *testing.T) {
+	resourceName := "vcp_vmware_server.test"
+	name := testName("nested")
+
+	var serverID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheckVmwareServer(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             acctest.CheckVmwareServersDestroyed,
+		Steps: []resource.TestStep{
+			// Ordered with the guest allowed a hypervisor of its own.
+			{
+				Config: testAccServerNestedHypervisorConfig(t, name, true),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(resourceName,
+						tfjsonpath.New("nested_hypervisor"), knownvalue.Bool(true)),
+					captureAttr(resourceName, "id", &serverID),
+				},
+				// And the machine itself says so, not only the state file.
+				Check: checkServerNestedHypervisor(resourceName, true),
+			},
+			// Nothing changed. Without this step the perpetual diff is invisible.
+			{Config: testAccServerNestedHypervisorConfig(t, name, true), PlanOnly: true},
+			// Switched off: an edit of the same machine, never a replacement.
+			{
+				PreConfig: waitForBackend,
+				Config:    testAccServerNestedHypervisorConfig(t, name, false),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(resourceName,
+						tfjsonpath.New("nested_hypervisor"), knownvalue.Bool(false)),
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// The same machine: the id it was created with.
+					resource.TestCheckResourceAttrPtr(resourceName, "id", &serverID),
+					checkServerNestedHypervisor(resourceName, false),
+				),
+			},
+			// Settled again after the edit.
+			{Config: testAccServerNestedHypervisorConfig(t, name, false), PlanOnly: true},
+			// The API reports the setting, so an imported machine knows it — which is
+			// why it is deliberately absent from serverImportIgnores.
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: serverImportIgnores,
+			},
+			// Switched on in the panel: the refresh has to see it and offer to put it
+			// back, rather than echoing the configuration back at itself.
+			{
+				PreConfig: func() {
+					waitForBackend()
+					setNestedHypervisorOutOfBand(t, serverID, true)
+				},
+				Config:             testAccServerNestedHypervisorConfig(t, name, false),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
 // TestAccVmwareServer_dataSources covers the read-only side a user reaches for
 // before writing any resource: what locations exist, which images they carry,
 // what GPU profiles are on offer — and, once a machine exists, finding it again
