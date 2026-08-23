@@ -321,6 +321,27 @@ resource "vcp_vmware_server" "test" {
 `, vmwareLocationID(t), name, computerName, vmwareImageID(t))
 }
 
+// testAccServerNestedHypervisorConfig orders the machine with nested
+// virtualization in the requested state. The two states are one configuration
+// with a single value changed: switching the attribute is an in-place edit, and a
+// configuration that differed in anything else would let a replacement pass for
+// one.
+func testAccServerNestedHypervisorConfig(t *testing.T, name string, enabled bool) string {
+	t.Helper()
+	return catalogConfig(t) + fmt.Sprintf(`
+resource "vcp_vmware_server" "test" {
+  location_id       = %[1]s
+  name              = %[2]q
+  image_id          = %[3]s
+  cpu               = 1
+  ram_mb            = local.ram_mb
+  system_disk_mb    = local.system_disk_mb
+  system_disk_type  = local.disk_type.title
+  nested_hypervisor = %[4]t
+}
+`, vmwareLocationID(t), name, vmwareImageID(t), enabled)
+}
+
 func testAccServerDataSourcesConfig(t *testing.T, name string) string {
 	t.Helper()
 	return catalogConfig(t) + serverConfig(t, "test", name, "") + fmt.Sprintf(`
