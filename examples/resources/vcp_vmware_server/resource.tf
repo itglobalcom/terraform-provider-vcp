@@ -29,3 +29,20 @@ resource "vcp_vmware_server" "gpu" {
     card_count = 1
   }
 }
+
+# Nested virtualization: the guest is given hardware-assisted CPU virtualization
+# and can run a hypervisor of its own. The location has to offer a VDC that
+# supports it (nested_hypervisor_supported in vcp_vmware_locations), and gpu
+# cannot be used on the same machine. Switching the attribute on an existing
+# server restarts it.
+resource "vcp_vmware_server" "lab" {
+  location_id    = 5
+  name           = "lab-01"
+  computer_name  = "lab01"
+  image_id       = 42
+  cpu            = 4
+  ram_mb         = 16384
+  system_disk_mb = 102400
+
+  nested_hypervisor = true
+}
