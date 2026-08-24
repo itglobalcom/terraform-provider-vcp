@@ -56,3 +56,6 @@ be mixed). The API serializes changes per object while Terraform applies in para
 mutating path locks its **parent** (`internal/locks`). A rule set belongs to one resource whole (an
 empty list clears it); `Optional + Computed` is for what the platform supplies; a field the API takes
 and ignores is not worth having; a nested attribute's schema and its `attr.Type` map must agree.
+Attributes the platform cannot hold at once are rejected in the resource's `ValidateConfig` — an
+`AddAttributeError` on the conflicting attribute, named in its schema description and covered by a
+unit test — not left to the API to refuse mid-apply.
