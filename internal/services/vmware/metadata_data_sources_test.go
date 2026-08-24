@@ -9,13 +9,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// Reading the location capability back out of the catalog.
-//
-// nested_hypervisor_supported has to be named in three places — the model, the
-// schema and the Read that fills the model in — and the schema is the only one
-// TestLocationsReportNestedHypervisorSupport covers. A Read that never writes the
-// field leaves it null, which reads as "no VDC here supports it" and sends a user
-// hunting for a location that already was the right one.
+// Reading the location capability back out of the catalog: a Read that never
+// writes nested_hypervisor_supported leaves it null, which reads as "no VDC
+// here supports it".
 func TestLocationsDataSourceReadReportsNestedHypervisorSupport(t *testing.T) {
 	api := newFakeAPI(t)
 	// Two locations, each capability set the opposite way round on them: a Read
@@ -38,8 +34,7 @@ func TestLocationsDataSourceReadReportsNestedHypervisorSupport(t *testing.T) {
 			t.Errorf("locations[%d].nested_hypervisor_supported = %v, want %v", i, got.ValueBool(), want)
 		}
 	}
-	// The capability it sits beside, so a Read filling every bool from one source
-	// would be noticed rather than passing.
+	// gpu_supported sits beside it: catches a Read filling both bools from one source.
 	if state.Locations[0].GpuSupported.ValueBool() || !state.Locations[1].GpuSupported.ValueBool() {
 		t.Errorf("gpu_supported did not come through: %+v", state.Locations)
 	}

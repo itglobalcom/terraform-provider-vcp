@@ -75,10 +75,8 @@ type vmwareLocationModel struct {
 	ID           types.Int64  `tfsdk:"id"`
 	TechTitle    types.String `tfsdk:"tech_title"`
 	GpuSupported types.Bool   `tfsdk:"gpu_supported"`
-	// NestedHypervisorSupported is derived from the VDCs this project may be
-	// provisioned in, so the same location can report differently for two
-	// projects — it is the capability to consult before ordering a server with
-	// nested_hypervisor, not a property of the datacenter.
+	// NestedHypervisorSupported is derived from the VDCs the project may be
+	// provisioned in, so the same location can report differently per project.
 	NestedHypervisorSupported types.Bool                    `tfsdk:"nested_hypervisor_supported"`
 	DiskTypes                 []vmwareLocationDiskTypeModel `tfsdk:"disk_types"`
 }

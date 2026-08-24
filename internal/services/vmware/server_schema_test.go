@@ -12,14 +12,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// The declaration of `nested_hypervisor`, asserted attribute by attribute.
-//
-// TestResourceSchemas only proves a schema is internally consistent, and every
-// mistake this file is about produces a perfectly consistent schema: an attribute
-// that is Computed but not Optional cannot be asked for, one without
+// The declaration of `nested_hypervisor`, asserted attribute by attribute: an
+// attribute that is Computed but not Optional cannot be asked for, one without
 // UseStateForUnknown plans as "known after apply" on every run, and one that
-// requires replacement destroys the machine — and its disk — to change a setting
-// the platform edits in place.
+// requires replacement destroys the machine to change an in-place setting.
 
 // dataSourceSchema returns a data source's schema, validated the way the
 // framework validates it.
@@ -43,9 +39,7 @@ func dsNestedAttrs(t *testing.T, s dsschema.Schema, owner, name string) map[stri
 	return list.NestedObject.Attributes
 }
 
-// requireComputedBool asserts a data source reports a flag, and reports it as a
-// bool: a data source that does not declare the attribute cannot be read for it,
-// however faithfully the mapper fills the model in.
+// requireComputedBool asserts a data source declares the flag as a Computed bool.
 func requireComputedBool(t *testing.T, attrs map[string]dsschema.Attribute, owner, name string) {
 	t.Helper()
 	attr, ok := attrs[name]
@@ -70,9 +64,6 @@ func TestServerNestedHypervisorAttribute(t *testing.T) {
 			s.Attributes["nested_hypervisor"])
 	}
 
-	// Optional: it is asked for at order time. Computed: a machine ordered without
-	// it comes back with the platform's answer, and a null in state would diff
-	// against that reading for ever.
 	if !attr.IsOptional() {
 		t.Error(`"nested_hypervisor" must be Optional — it is a setting a user asks for`)
 	}
@@ -84,11 +75,9 @@ func TestServerNestedHypervisorAttribute(t *testing.T) {
 	}
 
 	t.Run("a known state is kept instead of planning unknown", func(t *testing.T) {
-		// Without UseStateForUnknown an Optional+Computed attribute left out of the
-		// configuration plans as "known after apply" every single run: a diff on a
-		// machine nobody touched, and on this attribute a diff means a power cycle.
-		// The machine exists and has the setting on; the configuration says nothing
-		// about it, so the framework hands the modifier an unknown planned value.
+		// The machine has the setting on and the configuration says nothing about
+		// it, so the framework hands the modifier an unknown planned value;
+		// UseStateForUnknown must keep the known state instead.
 		unset := nestedHypervisorModel(true)
 		unset.NestedHypervisor = types.BoolNull()
 		unknown := nestedHypervisorModel(true)
@@ -118,9 +107,7 @@ func TestServerNestedHypervisorAttribute(t *testing.T) {
 	})
 
 	t.Run("switching it is an edit, not a replacement", func(t *testing.T) {
-		// The platform switches the setting on the machine that is already there.
-		// RequiresReplace here would destroy the server, and its data with it, to
-		// change a checkbox.
+		// RequiresReplace here would destroy the server to change an in-place setting.
 		off, on := nestedHypervisorModel(false), nestedHypervisorModel(true)
 		req := planmodifier.BoolRequest{
 			Path:        path.Root("nested_hypervisor"),
@@ -161,9 +148,8 @@ func nestedHypervisorModel(enabled bool) serverModel {
 	}
 }
 
-// A setting is only usable if it can be read back, so both server data sources
-// report it — the by-id one and the list, which are two schemas built from one
-// attribute map.
+// Both server data sources report the setting — the by-id one and the list,
+// two schemas built from one attribute map.
 func TestServerDataSourcesReportNestedHypervisor(t *testing.T) {
 	byID := dataSourceSchema(t, "vcp_vmware_server", NewServerDataSource)
 	requireComputedBool(t, byID.Attributes, "data.vcp_vmware_server", "nested_hypervisor")
@@ -173,15 +159,13 @@ func TestServerDataSourcesReportNestedHypervisor(t *testing.T) {
 		"data.vcp_vmware_servers.servers[*]", "nested_hypervisor")
 }
 
-// The capability has to be discoverable before a machine is ordered: the platform
-// refuses nested virtualization in a location whose VDCs do not support it, and
-// the catalog is the only place to find that out without provoking the refusal.
+// The capability has to be discoverable before a machine is ordered; the
+// catalog is the only place to find it out without provoking the refusal.
 func TestLocationsReportNestedHypervisorSupport(t *testing.T) {
 	locations := dataSourceSchema(t, "vcp_vmware_locations", NewLocationsDataSource)
 	attrs := dsNestedAttrs(t, locations, "data.vcp_vmware_locations", "locations")
 
 	requireComputedBool(t, attrs, "data.vcp_vmware_locations.locations[*]", "nested_hypervisor_supported")
-	// The flag it sits beside, so a rename of one does not silently take the other
-	// with it: both are capabilities of the location, read the same way.
+	// gpu_supported is the flag it sits beside, read the same way.
 	requireComputedBool(t, attrs, "data.vcp_vmware_locations.locations[*]", "gpu_supported")
 }

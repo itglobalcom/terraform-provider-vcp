@@ -166,10 +166,9 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					"card_count": schema.Int64Attribute{Required: true, Description: "Number of GPU cards."},
 				},
 			},
-			// Optional+Computed like computer_name: a machine ordered without it comes
-			// back with the platform's value (off), and UseStateForUnknown is what keeps
-			// the plan from showing "known after apply" on every run — an Optional+Computed
-			// attribute without it is the classic perpetual diff.
+			// Optional+Computed like computer_name; UseStateForUnknown keeps a machine
+			// ordered without the attribute from planning "known after apply" on every
+			// run — the classic perpetual diff.
 			"nested_hypervisor": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
@@ -245,10 +244,8 @@ func (r *serverResource) ValidateConfig(ctx context.Context, req resource.Valida
 				"Set one or the other.")
 	}
 
-	// GPU and nested virtualization are mutually exclusive on the platform, which
-	// answers the order with APICodeVmwareOperationNotSupportedForGpuServer. Saying
-	// so here means the plan fails instead of promising a machine that the apply
-	// then refuses to order.
+	// GPU and nested virtualization are mutually exclusive on the platform;
+	// saying so here fails the plan instead of the apply.
 	gpuSet := !config.Gpu.IsNull() && !config.Gpu.IsUnknown()
 	nestedRequested := !config.NestedHypervisor.IsNull() && !config.NestedHypervisor.IsUnknown() &&
 		config.NestedHypervisor.ValueBool()
@@ -291,8 +288,7 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 	createReq.BackupEnabled = optionalBool(plan.BackupEnabled)
 	createReq.BackupPeriod = optionalInt(plan.BackupPeriod)
 	createReq.NeedSysprep = optionalBool(plan.NeedSysprep)
-	// Optional+Computed: unknown means "not asked for", and the platform orders the
-	// machine with nested virtualization off.
+	// Unknown means "not asked for"; the platform then orders with it off.
 	createReq.NestedHypervisor = optionalBool(plan.NestedHypervisor)
 
 	sshKeys, diags := int64SetToInts(ctx, plan.SSHKeyIDs)
@@ -436,10 +432,9 @@ func (r *serverResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// Nested virtualization: two operations rather than one flag with a target
-	// state, and no replacement — the platform switches the setting on the machine
-	// that is already there. A null/unknown plan value means the attribute was
-	// dropped from the configuration, which is not a request to switch anything.
+	// Nested virtualization is switched in place on the existing machine. A
+	// null/unknown plan value means the attribute was dropped from the
+	// configuration — not a request to switch anything.
 	if !plan.NestedHypervisor.Equal(state.NestedHypervisor) &&
 		!plan.NestedHypervisor.IsNull() && !plan.NestedHypervisor.IsUnknown() {
 		if !r.switchNestedHypervisor(ctx, serverID, plan.NestedHypervisor.ValueBool(), &resp.Diagnostics) {
@@ -506,10 +501,9 @@ func (r *serverResource) updatePrimaryNICBandwidth(ctx context.Context, serverID
 	return true
 }
 
-// switchNestedHypervisor turns nested virtualization on or off on an existing
-// machine. The platform runs it as a saga that power-cycles a running guest, and
-// answers a request that matches the current state with no task at all — that is
-// success with nothing to await, not an error.
+// switchNestedHypervisor turns nested virtualization on or off in place. The
+// platform power-cycles a running guest and answers a request matching the
+// current state with no task at all — success with nothing to await.
 func (r *serverResource) switchNestedHypervisor(ctx context.Context, serverID int, enable bool,
 	diags *diag.Diagnostics) bool {
 	verb := "disable"
@@ -544,11 +538,9 @@ func (r *serverResource) switchNestedHypervisor(ctx context.Context, serverID in
 	return true
 }
 
-// nestedHypervisorFailureHint turns the platform's three refusals of nested
-// virtualization into something a user can act on: the API messages name the
-// condition but not what to do about it, and the GPU one does not even mention
-// nested virtualization. It returns "" for anything else, so it can be appended
-// to any error of the create and switch paths.
+// nestedHypervisorFailureHint turns the platform's refusals of nested
+// virtualization into something a user can act on; it returns "" for anything
+// else, so it can be appended to any error of the create and switch paths.
 func nestedHypervisorFailureHint(err error) string {
 	switch {
 	case sdk.IsVmwareOperationNotSupportedForGpuServer(err):

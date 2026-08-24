@@ -9,14 +9,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// The server resource driven against the fake API for the one setting that is
-// both an order option and an editable one: nested virtualization.
-//
-// What an acceptance run proves here costs a machine and several minutes per
-// step, and it cannot see the request at all — only its effect. These tests check
-// the call itself: that the order carries the flag, that switching it afterwards
-// is one POST and no replacement, and above all that an apply which changes
-// nothing sends nothing, because this endpoint power-cycles a running guest.
+// The server resource driven against the fake API: the order carries the flag,
+// a switch is one POST and no replacement, and an apply that changes nothing
+// sends nothing — the endpoint power-cycles a running guest.
 
 // createServer runs a Create and returns the state it left behind.
 func createServer(t *testing.T, api *fakeAPI, plan serverModel) (serverModel, resource.CreateResponse) {
@@ -61,10 +56,8 @@ func serverAt(id int64, enabled bool) serverModel {
 	return model
 }
 
-// The order carries the attribute only when it was asked for: the platform's
-// default is off, and an order that always sent a value would take the choice
-// away from the caller — and, for a `false` it invented, would send a field to an
-// API that need never have seen it.
+// The order carries the attribute only when the configuration asked for it;
+// the platform's default is off.
 func TestServerCreateSendsNestedHypervisor(t *testing.T) {
 	cases := map[string]struct {
 		planned  types.Bool
@@ -104,9 +97,7 @@ func TestServerCreateSendsNestedHypervisor(t *testing.T) {
 				t.Errorf("the order carried nested_hypervisor=%v, want %v", *sent, *tc.wantSent)
 			}
 
-			// State is the machine's reading, not an echo of the plan: a server
-			// ordered without the attribute has to end up with the platform's answer
-			// rather than staying unknown.
+			// State must hold the machine's reading, not an echo of the plan.
 			want := tc.wantSent != nil && *tc.wantSent
 			if state.NestedHypervisor.IsNull() || state.NestedHypervisor.IsUnknown() {
 				t.Fatalf("state holds nested_hypervisor=%v, want the value read back from the machine",
@@ -119,10 +110,8 @@ func TestServerCreateSendsNestedHypervisor(t *testing.T) {
 	}
 }
 
-// Switching the setting is an edit of the machine that is already there: one POST
-// to the action the change calls for, and the state that comes out is what the
-// API then reports — checked against the fake rather than against the provider's
-// own bookkeeping, which would agree with itself even if nothing had been sent.
+// Switching the setting is one POST to the matching action; the resulting state
+// is checked against the fake, not the provider's own bookkeeping.
 func TestServerUpdateSwitchesNestedHypervisorInPlace(t *testing.T) {
 	const serverID = 5678
 
@@ -148,8 +137,7 @@ func TestServerUpdateSwitchesNestedHypervisorInPlace(t *testing.T) {
 			if got := api.countCalls(tc.wantCall); got != 1 {
 				t.Errorf("made %d calls to %s, want exactly 1 (calls: %v)", got, tc.wantCall, api.calls())
 			}
-			// The machine is edited, not reordered: an Update that replaced it would
-			// show up here as an order or a delete.
+			// Edited, not reordered: a replacement would show up as an order or a delete.
 			if len(api.serverOrders) != 0 {
 				t.Error("the Update ordered a new machine; the setting is edited in place")
 			}
@@ -167,9 +155,8 @@ func TestServerUpdateSwitchesNestedHypervisorInPlace(t *testing.T) {
 	}
 }
 
-// An apply that does not change the setting must not touch the endpoint at all.
-// The switch is a saga that powers a running guest off and back on, so a spurious
-// call is not a wasted request — it is an unannounced reboot of somebody's server.
+// An apply that does not change the setting must not touch the endpoint: a
+// spurious call is an unannounced reboot of a running guest.
 func TestServerUpdateLeavesNestedHypervisorAlone(t *testing.T) {
 	const serverID = 5678
 
@@ -177,10 +164,8 @@ func TestServerUpdateLeavesNestedHypervisorAlone(t *testing.T) {
 		api := newFakeAPI(t)
 		api.addServerWithNestedHypervisor(serverID, "web-01", true)
 
-		// Something else changed, so the Update has work to do — and it has to be
-		// something Terraform would really bring to an Update: a rename is edited in
-		// place, whereas an attribute marked RequiresReplace never reaches Update at
-		// all, it replaces the machine.
+		// Something else changed — a rename, an in-place edit that really reaches
+		// Update — so the Update has work to do.
 		state := serverAt(serverID, true)
 		plan := serverAt(serverID, true)
 		plan.Name = types.StringValue("web-02")
@@ -188,8 +173,7 @@ func TestServerUpdateLeavesNestedHypervisorAlone(t *testing.T) {
 		if _, resp := updateServer(t, api, state, plan); resp.Diagnostics.HasError() {
 			t.Fatalf("Update failed: %v", resp.Diagnostics)
 		}
-		// The rename really happened, so the assertion below is about an Update that
-		// did something — not about one that quietly did nothing at all.
+		// The rename really happened: the Update did something.
 		if got := api.countCalls(fmt.Sprintf("PUT /api/v1/vmware/servers/%d/name", serverID)); got != 1 {
 			t.Errorf("made %d rename calls, want 1: %v", got, api.calls())
 		}
@@ -220,10 +204,8 @@ func TestServerUpdateLeavesNestedHypervisorAlone(t *testing.T) {
 	})
 }
 
-// The API answers a request that matches the current state with 200 and no task
-// id — there is nothing to do. That is the shape of a drift the platform resolved
-// on its own (somebody switched it in the panel to what Terraform was about to
-// ask for), and awaiting a task that does not exist would hang the apply.
+// A request that matches the current state is answered 200 with no task id;
+// awaiting a task that does not exist would hang the apply.
 func TestServerUpdateAcceptsNestedHypervisorAlreadyInPlace(t *testing.T) {
 	const serverID = 5678
 

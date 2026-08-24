@@ -229,8 +229,7 @@ func setServerFirewallOutOfBand(t *testing.T, serverID string, rules []entities.
 }
 
 // setNestedHypervisorOutOfBand switches nested virtualization on a server behind
-// Terraform's back — as close to "somebody ticked the box in the panel" as a test
-// can get. It waits for the saga, which power-cycles a running guest.
+// Terraform's back and waits for the saga.
 func setNestedHypervisorOutOfBand(t *testing.T, serverID string, enabled bool) {
 	t.Helper()
 	var err error
@@ -344,8 +343,7 @@ func checkServerFirewallRuleCount(serverID *string, want int) resource.TestCheck
 }
 
 // checkServerNestedHypervisor asserts, straight from the API, what the machine
-// itself reports. State agreeing with state would pass a resource that recorded
-// the value it was asked for without ever sending it.
+// itself reports — not what the resource recorded in state.
 func checkServerNestedHypervisor(resourceName string, want bool) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		serverID, err := intAttr(s, resourceName, "id")

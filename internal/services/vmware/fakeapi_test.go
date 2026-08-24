@@ -59,10 +59,8 @@ type fakeAPI struct {
 
 	nextID int
 
-	// serverOrders records the create requests the provider sent, decoded. An
-	// order option is a *bool or a *int in the SDK, so "not asked for" and
-	// "asked for and false" stay distinguishable — which is the whole difference
-	// between an Optional+Computed attribute left out and one set to false.
+	// serverOrders records the create requests the provider sent, decoded, so
+	// "not asked for" and "asked for and false" stay distinguishable.
 	serverOrders []entities.VmwareCreateServerRequest
 
 	// requests records every call, so a test can assert what the provider did
@@ -137,8 +135,7 @@ func (a *fakeAPI) addIsolatedNetwork(id int, name string) {
 	}
 }
 
-// addLocation registers a location in the catalog, with the two capabilities a
-// location is consulted for before a machine is ordered.
+// addLocation registers a location in the catalog.
 func (a *fakeAPI) addLocation(id int, techTitle string, gpu, nestedHypervisor bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -154,9 +151,8 @@ func (a *fakeAPI) addServer(id int, name string) {
 	a.serverFirewalls[id] = nil
 }
 
-// addServerWithNestedHypervisor registers a server whose nested virtualization is
-// in a known state — the starting point of a switch, and the reading a refresh
-// has to bring back.
+// addServerWithNestedHypervisor registers a server with nested virtualization
+// in a known state.
 func (a *fakeAPI) addServerWithNestedHypervisor(id int, name string, enabled bool) {
 	a.addServer(id, name)
 	a.mu.Lock()
@@ -164,9 +160,8 @@ func (a *fakeAPI) addServerWithNestedHypervisor(id int, name string, enabled boo
 	a.servers[id].NestedHypervisor = enabled
 }
 
-// nestedHypervisorOf reports what the fake holds for a server, which is what the
-// platform would answer the next read — state agreeing with itself would pass a
-// resource that never called the API at all.
+// nestedHypervisorOf reports what the fake holds for a server — what the
+// platform would answer the next read.
 func (a *fakeAPI) nestedHypervisorOf(id int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -218,8 +213,7 @@ var (
 	serverPath        = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
 	serverNamePath    = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
 	serverVolumesPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/volumes$`)
-	// The switch is two endpoints rather than one field: the action is in the path,
-	// and there is no request body at all.
+	// The switch action is in the path; there is no request body.
 	serverNestedHypervisorPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/nested-hypervisor/(enable|disable)$`)
 )
 
@@ -493,9 +487,9 @@ func (a *fakeAPI) handleServer(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, map[string]any{"server": server})
 }
 
-// handleServers answers the order. The fake records the request and creates the
-// machine the order describes, so a test can check both what was sent and what
-// the next read brings back.
+// handleServers answers the order: it records the request and creates the
+// machine it describes, so tests can check both what was sent and what the next
+// read brings back.
 func (a *fakeAPI) handleServers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
@@ -517,8 +511,7 @@ func (a *fakeAPI) handleServers(w http.ResponseWriter, r *http.Request) {
 		CPU: req.CPUCount, RamMB: req.RamMB, SystemDiskMB: req.SystemDiskSizeMB,
 		State: entities.VmwareServerStateActive, IsPowerOn: true,
 	}
-	// Omitted means off — the platform's own default, and the reason the attribute
-	// can be left out of a configuration at all.
+	// Omitted means off — the platform's default.
 	if req.NestedHypervisor != nil {
 		server.NestedHypervisor = *req.NestedHypervisor
 	}
@@ -527,8 +520,8 @@ func (a *fakeAPI) handleServers(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, entities.VmwareServerOrder{ServerID: id, TaskID: "vmw1006"})
 }
 
-// handleServerVolumes answers the volume list every server apply ends with. No
-// test here is about data disks, so the machine has none.
+// handleServerVolumes answers the volume list every server apply ends with; no
+// test here uses data disks.
 func (a *fakeAPI) handleServerVolumes(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(serverVolumesPath.FindStringSubmatch(r.URL.Path)[1])
 
@@ -554,9 +547,8 @@ func (a *fakeAPI) handleLocations(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, map[string]any{"locations": a.locations})
 }
 
-// handleServerName renames the machine. Renaming is the cheap in-place edit of
-// this resource — synchronous, no task — which makes it the "something else
-// changed" of an Update that must leave the nested hypervisor alone.
+// handleServerName renames the machine — the synchronous in-place edit used as
+// the "something else changed" of an Update.
 func (a *fakeAPI) handleServerName(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(serverNamePath.FindStringSubmatch(r.URL.Path)[1])
 
@@ -581,10 +573,9 @@ func (a *fakeAPI) handleServerName(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, map[string]any{})
 }
 
-// handleServerNestedHypervisor switches nested virtualization, reproducing the
-// one thing about this endpoint the SDK reads: a request that matches the current
-// state is answered 200 with a null task id, because there is nothing to do. A
-// caller that awaited that as a task would hang on an id that does not exist.
+// handleServerNestedHypervisor switches nested virtualization; a request that
+// matches the current state is answered 200 with a null task id — the
+// idempotent outcome the provider must not await as a task.
 func (a *fakeAPI) handleServerNestedHypervisor(w http.ResponseWriter, r *http.Request) {
 	match := serverNestedHypervisorPath.FindStringSubmatch(r.URL.Path)
 	id, _ := strconv.Atoi(match[1])

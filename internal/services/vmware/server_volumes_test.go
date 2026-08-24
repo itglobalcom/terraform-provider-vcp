@@ -259,9 +259,8 @@ func TestServerValidateConfig(t *testing.T) {
 		}
 	})
 
-	// The platform refuses an order that asks for both, so the only question is
-	// where the user finds out: at plan time, or minutes into an apply that has
-	// already started ordering.
+	// The platform refuses an order that asks for both; the validator moves the
+	// failure to plan time.
 	t.Run("a GPU and a nested hypervisor are not both possible", func(t *testing.T) {
 		model := base()
 		model.Gpu = gpuObject(t, 3, 8192, 1)
@@ -277,9 +276,8 @@ func TestServerValidateConfig(t *testing.T) {
 	})
 
 	t.Run("a GPU machine may still say nested_hypervisor = false", func(t *testing.T) {
-		// Refusing this would make the attribute unusable on a GPU machine: writing
-		// out the value the platform gives it anyway is not a conflict, and a user
-		// who states defaults explicitly must not be blocked.
+		// Stating the platform's default explicitly is not a conflict and must
+		// not be blocked.
 		model := base()
 		model.Gpu = gpuObject(t, 3, 8192, 1)
 		model.NestedHypervisor = types.BoolValue(false)

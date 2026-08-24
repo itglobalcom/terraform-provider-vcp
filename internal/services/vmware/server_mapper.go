@@ -41,9 +41,9 @@ type serverModel struct {
 	SSHKeyIDs            types.Set    `tfsdk:"ssh_key_ids"`
 	NeedSysprep          types.Bool   `tfsdk:"need_sysprep"`
 	Gpu                  types.Object `tfsdk:"gpu"`
-	// NestedHypervisor is asked for at order time like the fields above it, but
-	// unlike them the API reports it back and it can be switched afterwards, so it
-	// is read from the server rather than preserved from the configuration.
+	// NestedHypervisor is an order option the API also reports back and can
+	// switch afterwards, so it is read from the server rather than preserved
+	// from the configuration.
 	NestedHypervisor types.Bool `tfsdk:"nested_hypervisor"`
 	// Volumes are the additional data disks; the boot disk lives in
 	// SystemDiskMB/SystemDiskType. See server_volumes.go.
@@ -68,8 +68,7 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 	m.SystemDiskMB = types.Int64Value(int64(s.SystemDiskMB))
 	m.State = types.StringValue(s.State)
 	m.IsPowerOn = types.BoolValue(s.IsPowerOn)
-	// Reported by both the list and the by-id read, so a switch made in the panel
-	// shows up as drift instead of being echoed back from the configuration.
+	// Read from the API so a switch made in the panel shows up as drift.
 	m.NestedHypervisor = types.BoolValue(s.NestedHypervisor)
 	m.Created = types.StringValue(s.Created)
 

@@ -228,21 +228,13 @@ func TestAccVmwareServer_disappears(t *testing.T) {
 	})
 }
 
-// TestAccVmwareServer_nestedHypervisor covers the life of one setting: ordered
-// with it on, switched off in place on the machine that is already there,
-// imported, and changed in the panel behind Terraform's back.
+// TestAccVmwareServer_nestedHypervisor covers ordering with the setting on,
+// switching it off in place, import, and an out-of-band change in the panel.
 //
-// The step that matters most is the second one. `nested_hypervisor` is
-// Optional+Computed, and an Optional+Computed attribute without
-// UseStateForUnknown plans as "known after apply" on every single run — an
-// endless diff on a machine nobody touched. On this attribute a diff is not
-// cosmetic: applying it power-cycles the guest.
-//
-// The third step is the other half: the platform edits the setting on the machine
-// it is already on, so a plan that replaced the server would destroy the disk to
-// change a checkbox. The id is asserted to be the same one afterwards, because a
-// plan check alone would not notice a replacement the provider carried out for
-// some other reason.
+// nested_hypervisor is Optional+Computed: without UseStateForUnknown it plans
+// as "known after apply" on every run, and a diff here is a power cycle. The
+// switch edits the machine in place — a replacement would destroy the disk —
+// so the id is asserted unchanged afterwards.
 func TestAccVmwareServer_nestedHypervisor(t *testing.T) {
 	resourceName := "vcp_vmware_server.test"
 	name := testName("nested")
@@ -288,16 +280,15 @@ func TestAccVmwareServer_nestedHypervisor(t *testing.T) {
 			},
 			// Settled again after the edit.
 			{Config: testAccServerNestedHypervisorConfig(t, name, false), PlanOnly: true},
-			// The API reports the setting, so an imported machine knows it — which is
-			// why it is deliberately absent from serverImportIgnores.
+			// The API reports the setting, so import verifies it (it is deliberately
+			// absent from serverImportIgnores).
 			{
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: serverImportIgnores,
 			},
-			// Switched on in the panel: the refresh has to see it and offer to put it
-			// back, rather than echoing the configuration back at itself.
+			// Switched on in the panel: the refresh must see the drift.
 			{
 				PreConfig: func() {
 					waitForBackend()
@@ -404,11 +395,8 @@ resource "vcp_vmware_server" "test" {
 `, vmwareLocationID(t), name, computerName, vmwareImageID(t))
 }
 
-// testAccServerNestedHypervisorConfig orders the machine with nested
-// virtualization in the requested state. The two states are one configuration
-// with a single value changed: switching the attribute is an in-place edit, and a
-// configuration that differed in anything else would let a replacement pass for
-// one.
+// testAccServerNestedHypervisorConfig is one configuration with a single value
+// changed between the two states: switching the attribute is an in-place edit.
 func testAccServerNestedHypervisorConfig(t *testing.T, name string, enabled bool) string {
 	t.Helper()
 	return catalogConfig(t) + fmt.Sprintf(`
