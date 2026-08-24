@@ -116,8 +116,8 @@ func (d *locationsDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 						"tech_title":    schema.StringAttribute{Computed: true},
 						"gpu_supported": schema.BoolAttribute{Computed: true},
 						"nested_hypervisor_supported": schema.BoolAttribute{Computed: true,
-							Description: "Whether a VDC available to this project in the location supports " +
-								"nested virtualization, which is what vcp_vmware_server.nested_hypervisor needs."},
+							Description: "Whether a VDC available to this project in the location supports the " +
+								"Nested hypervisor setting, which is what vcp_vmware_server.nested_hypervisor needs."},
 						"disk_types": schema.ListNestedAttribute{
 							Computed: true,
 							NestedObject: schema.NestedAttributeObject{

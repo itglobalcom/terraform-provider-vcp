@@ -41,7 +41,7 @@ output "web_nested_hypervisor" {
 - `image_id` (Number)
 - `is_power_on` (Boolean)
 - `location_id` (Number)
-- `nested_hypervisor` (Boolean) Whether the guest OS may run its own hypervisor (nested virtualization).
+- `nested_hypervisor` (Boolean) Whether the guest OS may run its own hypervisor — the Nested hypervisor setting.
 - `nics` (Attributes List) (see [below for nested schema](#nestedatt--nics))
 - `ram_mb` (Number)
 - `state` (String)

@@ -2,6 +2,7 @@ package vmware
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -176,15 +177,21 @@ func TestServerUpdateLeavesNestedHypervisorAlone(t *testing.T) {
 		api := newFakeAPI(t)
 		api.addServerWithNestedHypervisor(serverID, "web-01", true)
 
-		// Something else changed, so the Update has work to do: backup_period is a
-		// write-only order option, which is why changing it reaches no endpoint of
-		// its own and leaves this test about one call only.
+		// Something else changed, so the Update has work to do — and it has to be
+		// something Terraform would really bring to an Update: a rename is edited in
+		// place, whereas an attribute marked RequiresReplace never reaches Update at
+		// all, it replaces the machine.
 		state := serverAt(serverID, true)
 		plan := serverAt(serverID, true)
-		plan.BackupPeriod = types.Int64Value(7)
+		plan.Name = types.StringValue("web-02")
 
 		if _, resp := updateServer(t, api, state, plan); resp.Diagnostics.HasError() {
 			t.Fatalf("Update failed: %v", resp.Diagnostics)
+		}
+		// The rename really happened, so the assertion below is about an Update that
+		// did something — not about one that quietly did nothing at all.
+		if got := api.countCalls(fmt.Sprintf("PUT /api/v1/vmware/servers/%d/name", serverID)); got != 1 {
+			t.Errorf("made %d rename calls, want 1: %v", got, api.calls())
 		}
 		if got := api.countCalls("nested-hypervisor"); got != 0 {
 			t.Errorf("made %d calls to the nested-hypervisor endpoint, want none: %v", got, api.calls())

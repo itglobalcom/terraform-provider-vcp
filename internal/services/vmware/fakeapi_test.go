@@ -54,6 +54,9 @@ type fakeAPI struct {
 	// server firewall rule sets, by server id.
 	serverFirewalls map[int][]entities.VmwareServerFirewallRule
 
+	// locations the catalog answers with, in the order they were added.
+	locations []*entities.VmwareLocation
+
 	nextID int
 
 	// serverOrders records the create requests the provider sent, decoded. An
@@ -134,6 +137,16 @@ func (a *fakeAPI) addIsolatedNetwork(id int, name string) {
 	}
 }
 
+// addLocation registers a location in the catalog, with the two capabilities a
+// location is consulted for before a machine is ordered.
+func (a *fakeAPI) addLocation(id int, techTitle string, gpu, nestedHypervisor bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.locations = append(a.locations, &entities.VmwareLocation{
+		ID: id, TechTitle: techTitle, GPUSupported: gpu, NestedHypervisorSupported: nestedHypervisor,
+	})
+}
+
 func (a *fakeAPI) addServer(id int, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -200,8 +213,10 @@ var (
 	serverFWPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
 	taskPath         = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
 
+	locationsPath     = regexp.MustCompile(`^/api/v1/vmware/locations$`)
 	serversPath       = regexp.MustCompile(`^/api/v1/vmware/servers$`)
 	serverPath        = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
+	serverNamePath    = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
 	serverVolumesPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/volumes$`)
 	// The switch is two endpoints rather than one field: the action is in the path,
 	// and there is no request body at all.
@@ -253,6 +268,8 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleServerFirewall(w, r)
 	case serverNestedHypervisorPath.MatchString(r.URL.Path):
 		a.handleServerNestedHypervisor(w, r)
+	case serverNamePath.MatchString(r.URL.Path):
+		a.handleServerName(w, r)
 	case serverVolumesPath.MatchString(r.URL.Path):
 		a.handleServerVolumes(w, r)
 	case serverPath.MatchString(r.URL.Path):
@@ -261,6 +278,8 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleServers(w, r)
 	case networkPath.MatchString(r.URL.Path):
 		a.handleNetwork(w, r)
+	case locationsPath.MatchString(r.URL.Path):
+		a.handleLocations(w, r)
 	default:
 		a.fail(w, http.StatusNotFound, -404, "no such endpoint: "+r.URL.Path)
 	}
@@ -521,6 +540,45 @@ func (a *fakeAPI) handleServerVolumes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, map[string]any{"volumes": []entities.VmwareVolume{}})
+}
+
+// handleLocations answers the location catalog. The envelope matters as much as
+// the values: the SDK reads the list out of a "locations" key.
+func (a *fakeAPI) handleLocations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.writeJSON(w, map[string]any{"locations": a.locations})
+}
+
+// handleServerName renames the machine. Renaming is the cheap in-place edit of
+// this resource — synchronous, no task — which makes it the "something else
+// changed" of an Update that must leave the nested hypervisor alone.
+func (a *fakeAPI) handleServerName(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverNamePath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	server, ok := a.servers[id]
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	if r.Method != http.MethodPut {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	var req entities.VmwareRenameServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "bad body")
+		return
+	}
+	server.Name = req.Name
+	a.writeJSON(w, map[string]any{})
 }
 
 // handleServerNestedHypervisor switches nested virtualization, reproducing the

@@ -173,13 +173,13 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"nested_hypervisor": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Whether the guest OS may run its own hypervisor (nested virtualization). " +
+				Description: "Whether the guest OS may run its own hypervisor — the Nested hypervisor setting. " +
 					"Editable in place; switching it restarts a running machine. Cannot be combined with gpu, " +
 					"and the location must offer a VDC that supports it (nested_hypervisor_supported in " +
 					"vcp_vmware_locations).",
-				MarkdownDescription: "Whether the guest operating system may run its own hypervisor — nested " +
-					"virtualization, what the panel calls exposing hardware-assisted CPU virtualization to the " +
-					"guest OS. Off unless asked for, and editable in place.\n\n" +
+				MarkdownDescription: "Whether the guest operating system may run its own hypervisor — the " +
+					"**Nested hypervisor** setting, what the panel calls exposing hardware-assisted CPU " +
+					"virtualization to the guest OS. Off unless asked for, and editable in place.\n\n" +
 					"~> **Switching this restarts a running machine.** The platform powers the guest off, changes " +
 					"the setting and powers it back on; a machine that is already off stays off.\n\n" +
 					"~> It cannot be combined with `gpu`, and the location has to offer a VDC that supports it — " +
@@ -555,7 +555,7 @@ func nestedHypervisorFailureHint(err error) string {
 		return "\n\nThe platform refuses this for a machine with a GPU allocation: gpu and nested_hypervisor " +
 			"are mutually exclusive. Order the machine without gpu, or leave nested_hypervisor off."
 	case sdk.IsVmwareNestedHypervisorNotSupportedInLocation(err):
-		return "\n\nNo VDC available to this project in that location supports nested virtualization. Check " +
+		return "\n\nNo VDC available to this project in that location supports the Nested hypervisor setting. Check " +
 			"nested_hypervisor_supported in vcp_vmware_locations and pick a location that reports true."
 	case sdk.IsVmwareServerSuspended(err):
 		return "\n\nThe machine is suspended, and the platform cannot change this setting on a suspended " +

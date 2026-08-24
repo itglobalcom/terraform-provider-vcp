@@ -39,7 +39,7 @@ Read-Only:
 - `disk_types` (Attributes List) (see [below for nested schema](#nestedatt--locations--disk_types))
 - `gpu_supported` (Boolean)
 - `id` (Number)
-- `nested_hypervisor_supported` (Boolean) Whether a VDC available to this project in the location supports nested virtualization, which is what vcp_vmware_server.nested_hypervisor needs.
+- `nested_hypervisor_supported` (Boolean) Whether a VDC available to this project in the location supports the Nested hypervisor setting, which is what vcp_vmware_server.nested_hypervisor needs.
 - `tech_title` (String)
 
 <a id="nestedatt--locations--disk_types"></a>

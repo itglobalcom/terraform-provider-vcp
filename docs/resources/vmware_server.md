@@ -66,7 +66,7 @@ resource "vcp_vmware_server" "gpu" {
   }
 }
 
-# Nested virtualization: the guest is given hardware-assisted CPU virtualization
+# Nested hypervisor: the guest is given hardware-assisted CPU virtualization
 # and can run a hypervisor of its own. The location has to offer a VDC that
 # supports it (nested_hypervisor_supported in vcp_vmware_locations), and gpu
 # cannot be used on the same machine. Switching the attribute on an existing
@@ -105,7 +105,7 @@ resource "vcp_vmware_server" "lab" {
 The backend normalises this value to **UPPERCASE** (review SRV-3); the provider treats `computer_name` case-insensitively, so writing it in any case does not cause a perpetual diff.
 - `gpu` (Attributes) GPU profile. Changing this forces recreation. (see [below for nested schema](#nestedatt--gpu))
 - `need_sysprep` (Boolean) Run sysprep at creation. Changing this forces recreation.
-- `nested_hypervisor` (Boolean) Whether the guest operating system may run its own hypervisor — nested virtualization, what the panel calls exposing hardware-assisted CPU virtualization to the guest OS. Off unless asked for, and editable in place.
+- `nested_hypervisor` (Boolean) Whether the guest operating system may run its own hypervisor — the **Nested hypervisor** setting, what the panel calls exposing hardware-assisted CPU virtualization to the guest OS. Off unless asked for, and editable in place.
 
 ~> **Switching this restarts a running machine.** The platform powers the guest off, changes the setting and powers it back on; a machine that is already off stays off.
 

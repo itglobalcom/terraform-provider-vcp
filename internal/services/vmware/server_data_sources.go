@@ -105,7 +105,7 @@ func dsServerAttributes(computedID bool) map[string]schema.Attribute {
 		"is_power_on":        schema.BoolAttribute{Computed: true},
 		"vm_tools_installed": schema.BoolAttribute{Computed: true},
 		"nested_hypervisor": schema.BoolAttribute{Computed: true,
-			Description: "Whether the guest OS may run its own hypervisor (nested virtualization)."},
+			Description: "Whether the guest OS may run its own hypervisor — the Nested hypervisor setting."},
 		"gpu":     gpu,
 		"nics":    nics,
 		"created": schema.StringAttribute{Computed: true},
