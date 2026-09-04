@@ -88,6 +88,12 @@ func configFixtures(t *testing.T) []configFixture {
 		{"volumes/two", "TestAccVmwareServerVolumes_lifecycle — a second disk alongside the first.",
 			testAccServerVolumesConfig(t, name, testAccVolumeDataGrown+testAccVolumeLogs)},
 
+		// ---------- Snapshot ----------
+		{"snapshot/one", "TestAccVmwareServerSnapshot_lifecycle, _disappears — the single snapshot a VMware server can hold.",
+			testAccServerSnapshotConfig(t, name, "before-upgrade")},
+		{"snapshot/two", "TestAccVmwareServerSnapshot_secondIsRefused — a second snapshot of one machine, which the platform allows no server to hold.",
+			testAccServerSnapshotPairConfig(t, name)},
+
 		// ---------- Interfaces ----------
 		{"nic/attachmentBase", "TestAccVmwareServerNetworkAttachment_basic (last step) — server and network with no attachment between them.",
 			testAccAttachmentBaseConfig(t, name, address)},

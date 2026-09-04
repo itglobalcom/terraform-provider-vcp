@@ -231,6 +231,7 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		vmware.NewServerResource,
 		vmware.NewServerNetworkAttachmentResource,
 		vmware.NewServerPublicInterfaceResource,
+		vmware.NewServerSnapshotResource,
 		vmware.NewServerFirewallResource,
 		vmware.NewEdgeFirewallResource,
 		vmware.NewEdgeNATResource,

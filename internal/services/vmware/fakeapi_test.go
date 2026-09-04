@@ -54,6 +54,10 @@ type fakeAPI struct {
 	// server firewall rule sets, by server id.
 	serverFirewalls map[int][]entities.VmwareServerFirewallRule
 
+	// the one snapshot a server may hold, by server id. Absent means the server
+	// has none, which the API reports as a 200 with no "snapshot" key at all.
+	snapshots map[int]*entities.VmwareSnapshot
+
 	nextID int
 
 	// requests records every call, so a test can assert what the provider did
@@ -79,6 +83,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		firewalls:       map[int]*entities.VmwareEdgeFirewall{},
 		natRules:        map[int][]entities.VmwareEdgeNATRule{},
 		serverFirewalls: map[int][]entities.VmwareServerFirewallRule{},
+		snapshots:       map[int]*entities.VmwareSnapshot{},
 		failNext:        map[string]int{},
 		failAfter:       map[string]int{},
 		nextID:          600,
@@ -168,11 +173,12 @@ func (a *fakeAPI) countCalls(substr string) int {
 }
 
 var (
-	edgeNATPath      = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)/edge/nat/?(\d*)$`)
-	edgeFirewallPath = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)/edge/firewall$`)
-	networkPath      = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)$`)
-	serverFWPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
-	taskPath         = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
+	edgeNATPath        = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)/edge/nat/?(\d*)$`)
+	edgeFirewallPath   = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)/edge/firewall$`)
+	networkPath        = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)$`)
+	serverFWPath       = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
+	serverSnapshotPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/snapshot$`)
+	taskPath           = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
 )
 
 func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +224,8 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleEdgeFirewall(w, r)
 	case serverFWPath.MatchString(r.URL.Path):
 		a.handleServerFirewall(w, r)
+	case serverSnapshotPath.MatchString(r.URL.Path):
+		a.handleServerSnapshot(w, r)
 	case networkPath.MatchString(r.URL.Path):
 		a.handleNetwork(w, r)
 	default:
@@ -411,6 +419,59 @@ func (a *fakeAPI) handleServerFirewall(w http.ResponseWriter, r *http.Request) {
 		}
 		a.serverFirewalls[id] = req.Rules
 		a.writeTask(w, "vmw1005")
+	default:
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+	}
+}
+
+// handleServerSnapshot serves the singleton snapshot of a server.
+//
+// The read is where the fake earns its keep: a server with no snapshot answers
+// 200 with the body `{}`, not `{"snapshot": null}` and not 404, because the
+// Public API drops null fields (NullValueHandling.Ignore). Reproducing the DTO's
+// shape instead of the wire's would make the "no snapshot" test prove nothing.
+func (a *fakeAPI) handleServerSnapshot(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverSnapshotPath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if _, ok := a.servers[id]; !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	snapshot := a.snapshots[id]
+
+	switch r.Method {
+	case http.MethodGet:
+		if snapshot == nil {
+			a.writeJSON(w, map[string]any{})
+			return
+		}
+		a.writeJSON(w, map[string]any{"snapshot": snapshot})
+
+	case http.MethodPost:
+		var req entities.VmwareCreateSnapshotRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			a.fail(w, http.StatusBadRequest, -2002, "bad body")
+			return
+		}
+		if snapshot != nil {
+			// OnlyOneSnapshotIsAllowed: the platform refuses the second one.
+			a.fail(w, http.StatusBadRequest, -12055, "only one snapshot is allowed")
+			return
+		}
+		a.snapshots[id] = &entities.VmwareSnapshot{Name: req.Name, Created: "2026-09-04T10:00:00Z"}
+		a.writeTask(w, "vmw1006")
+
+	case http.MethodDelete:
+		if snapshot == nil {
+			a.fail(w, http.StatusNotFound, -404, "snapshot not found")
+			return
+		}
+		a.snapshots[id] = nil
+		a.writeTask(w, "vmw1007")
+
 	default:
 		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
 	}
