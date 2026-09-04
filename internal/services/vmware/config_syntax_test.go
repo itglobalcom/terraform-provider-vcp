@@ -88,6 +88,14 @@ func configFixtures(t *testing.T) []configFixture {
 		{"volumes/two", "TestAccVmwareServerVolumes_lifecycle — a second disk alongside the first.",
 			testAccServerVolumesConfig(t, name, testAccVolumeDataGrown+testAccVolumeLogs)},
 
+		// ---------- Copy ----------
+		{"copy/basic", "TestAccVmwareServerCopy_lifecycle — a machine and a copy of it, which states only where it comes from and what it is called.",
+			testAccServerCopyConfig(t, name)},
+		{"copy/resized", "TestAccVmwareServerCopy_lifecycle — the same copy resized in place, which is what a copy is once it exists.",
+			testAccServerCopyResizedConfig(t, name)},
+		{"copy/withImage", "TestAccVmwareServerCopy_refusesOrderArguments — a copy and an image at once, refused at plan time.",
+			testAccServerCopyWithImageConfig(t, name)},
+
 		// ---------- Snapshot ----------
 		{"snapshot/one", "TestAccVmwareServerSnapshot_lifecycle, _disappears — the single snapshot a VMware server can hold.",
 			testAccServerSnapshotConfig(t, name, "before-upgrade")},

@@ -178,6 +178,8 @@ var (
 	networkPath        = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)$`)
 	serverFWPath       = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
 	serverSnapshotPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/snapshot$`)
+	serverCopyPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/copy$`)
+	serverPath         = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
 	taskPath           = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
 )
 
@@ -226,6 +228,10 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleServerFirewall(w, r)
 	case serverSnapshotPath.MatchString(r.URL.Path):
 		a.handleServerSnapshot(w, r)
+	case serverCopyPath.MatchString(r.URL.Path):
+		a.handleServerCopy(w, r)
+	case serverPath.MatchString(r.URL.Path):
+		a.handleServer(w, r)
 	case networkPath.MatchString(r.URL.Path):
 		a.handleNetwork(w, r)
 	default:
@@ -422,6 +428,59 @@ func (a *fakeAPI) handleServerFirewall(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
 	}
+}
+
+func (a *fakeAPI) handleServer(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverPath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	server, ok := a.servers[id]
+	a.mu.Unlock()
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	a.writeJSON(w, map[string]any{"server": server})
+}
+
+// handleServerCopy duplicates a server the way the platform does: everything but
+// the name comes from the source, and the answer carries the new server's id
+// alongside the task — a copy is identifiable straight away, unlike a volume or
+// an interface.
+func (a *fakeAPI) handleServerCopy(w http.ResponseWriter, r *http.Request) {
+	sourceID, _ := strconv.Atoi(serverCopyPath.FindStringSubmatch(r.URL.Path)[1])
+
+	if r.Method != http.MethodPost {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	source, ok := a.servers[sourceID]
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+
+	var req entities.VmwareCopyServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "bad body")
+		return
+	}
+	if req.Name == "" {
+		a.fail(w, http.StatusBadRequest, -2002, "name is required")
+		return
+	}
+
+	a.nextID++
+	copied := *source
+	copied.ID = a.nextID
+	copied.Name = req.Name
+	a.servers[copied.ID] = &copied
+
+	a.writeJSON(w, entities.VmwareServerOrder{ServerID: copied.ID, TaskID: "vmw1008"})
 }
 
 // handleServerSnapshot serves the singleton snapshot of a server.

@@ -40,7 +40,11 @@ type serverModel struct {
 	BackupPeriod         types.Int64  `tfsdk:"backup_period"`
 	SSHKeyIDs            types.Set    `tfsdk:"ssh_key_ids"`
 	NeedSysprep          types.Bool   `tfsdk:"need_sysprep"`
-	Gpu                  types.Object `tfsdk:"gpu"`
+	// CopyFromServerID is the source of a copy. Nothing reports that a machine is
+	// a copy, so it is never refreshed — the caller preserves it like the other
+	// write-only create inputs.
+	CopyFromServerID types.Int64  `tfsdk:"copy_from_server_id"`
+	Gpu              types.Object `tfsdk:"gpu"`
 	// Volumes are the additional data disks; the boot disk lives in
 	// SystemDiskMB/SystemDiskType. See server_volumes.go.
 	Volumes []serverVolumeModel `tfsdk:"volumes"`
