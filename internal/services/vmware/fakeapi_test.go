@@ -599,6 +599,50 @@ func planOf(t *testing.T, s rsschema.Schema, model any) tfsdk.Plan {
 	return plan
 }
 
+// planForCreate turns a model into the plan the framework hands a Create: a
+// Computed attribute the configuration leaves null is *unknown* there, not null,
+// until the apply settles it. planOf alone writes nulls, and a null is already
+// settled — a resource that never resolves an unknown would pass with it.
+//
+// Deriving the unknowns from the schema rather than listing them means a new
+// Optional+Computed attribute comes under the same check without anyone
+// remembering to add it.
+func planForCreate(t *testing.T, s rsschema.Schema, model any) tfsdk.Plan {
+	t.Helper()
+	plan := planOf(t, s, model)
+
+	attributes := map[string]tftypes.Value{}
+	if err := plan.Raw.As(&attributes); err != nil {
+		t.Fatalf("reading the plan back: %v", err)
+	}
+	for name, attribute := range s.Attributes {
+		if !attribute.IsComputed() || !attributes[name].IsNull() {
+			continue
+		}
+		attributes[name] = tftypes.NewValue(attributes[name].Type(), tftypes.UnknownValue)
+	}
+	plan.Raw = tftypes.NewValue(plan.Raw.Type(), attributes)
+	return plan
+}
+
+// assertNoUnknowns fails on any value the resource left unresolved. Terraform
+// refuses such a state with "Provider produced inconsistent result after apply",
+// which aborts the apply after the object has already been created — and without
+// a live stand this is the only place it shows up.
+func assertNoUnknowns(t *testing.T, state tfsdk.State) {
+	t.Helper()
+	err := tftypes.Walk(state.Raw, func(path *tftypes.AttributePath, value tftypes.Value) (bool, error) {
+		if !value.IsKnown() {
+			t.Errorf("%s is still unknown after the apply", path)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("walking the state: %v", err)
+	}
+}
+
 // configOf turns a model into a configuration, for ValidateConfig. A Config is
 // read-only, so the value is built through a State and handed over.
 func configOf(t *testing.T, s rsschema.Schema, model any) tfsdk.Config {

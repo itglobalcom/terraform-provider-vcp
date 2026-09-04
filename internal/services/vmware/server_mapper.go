@@ -73,9 +73,12 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 	// SRV-5: the primary interface reports its bandwidth, so network_bandwidth_mbps
 	// is a real reading rather than an echo of the order. A zero means the field
 	// was not populated — keep whatever the caller had instead of recording a
-	// bandwidth no interface can have.
+	// bandwidth no interface can have, and settle an unknown on null (see
+	// system_disk_type below).
 	if primary := primaryNIC(s.NICs); primary != nil && primary.BandwidthMbps > 0 {
 		m.NetworkBandwidthMbps = types.Int64Value(int64(primary.BandwidthMbps))
+	} else if m.NetworkBandwidthMbps.IsUnknown() {
+		m.NetworkBandwidthMbps = types.Int64Null()
 	}
 
 	if s.ComputerName != nil {
@@ -83,13 +86,23 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 	} else {
 		m.ComputerName = types.StringNull()
 	}
-	// system_disk_type is Optional+Computed+RequiresReplace and read may omit it
-	// (SDK field is *string,omitempty). Only overwrite from the response when the
-	// API actually returned it; otherwise keep the caller's plan/prior value, so a
-	// user-set "ssd" is not clobbered to null (which would cause an inconsistent
-	// result and a perpetual replace).
+	// system_disk_type is Optional+Computed+RequiresReplace, and a read really can
+	// omit it: the server's disk type is a nullable link, and the API drops null
+	// fields (NullValueHandling.Ignore), so the key is absent from the wire rather
+	// than null. Only overwrite from the response when the API actually returned
+	// it; otherwise keep the caller's plan/prior value, so a user-set "ssd" is not
+	// clobbered to null (which would cause an inconsistent result and a perpetual
+	// replace).
+	//
+	// An unknown is the one value that cannot be kept: it is what a create leaves
+	// for an Optional+Computed attribute the configuration does not set — every
+	// attribute of a copy, which takes only a name — and an unknown still in state
+	// after the apply is "Provider produced inconsistent result after apply".
+	// Null is what it settles on: the API reported nothing to record.
 	if s.SystemDiskType != nil {
 		m.SystemDiskType = types.StringValue(*s.SystemDiskType)
+	} else if m.SystemDiskType.IsUnknown() {
+		m.SystemDiskType = types.StringNull()
 	}
 	if s.VmToolsInstalled != nil {
 		m.VmToolsInstalled = types.BoolValue(*s.VmToolsInstalled)

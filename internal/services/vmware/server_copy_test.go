@@ -2,6 +2,9 @@ package vmware
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -138,6 +141,72 @@ func TestVmwareServerCopyCreate(t *testing.T) {
 	}
 	if got := api.countCalls("POST /api/v1/vmware/servers"); got != 1 {
 		t.Errorf("made %d POSTs under /servers; a copy must not also order a machine", got)
+	}
+}
+
+// A copy leaves no unknown behind, even when the API reports neither a disk type
+// nor an interface.
+//
+// A copy declares nothing but a name, so every Optional+Computed attribute of it
+// is unknown in the plan and has to be settled by the apply. Two of them are
+// settled from fields that can be missing: the server's disk type is a nullable
+// link, and the API drops null fields (NullValueHandling.Ignore), so
+// system_disk_type is absent from the body rather than null; network_bandwidth_
+// mbps is read off the primary interface, and the read reports none while the
+// machine is still being built. Leaving either unknown fails the apply with
+// "Provider produced inconsistent result after apply" — after the machine has
+// been created, which is the expensive way to find out.
+func TestVmwareServerCopyLeavesNoUnknownState(t *testing.T) {
+	api := newFakeAPI(t)
+	addSpecServer(api, 5678, "web") // no disk type and no interfaces: the fields that go missing
+	assertServerBodyOmits(t, api, 5678, "system_disk_type")
+
+	res := &serverResource{}
+	configure(t, res, api.client(t))
+	s := resourceSchema(t, res)
+
+	resp := resource.CreateResponse{State: emptyState(s)}
+	res.Create(context.Background(), resource.CreateRequest{
+		Plan: planForCreate(t, s, copyServerModel(5678, "web-clone")),
+	}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Create failed: %v", resp.Diagnostics)
+	}
+
+	assertNoUnknowns(t, resp.State)
+
+	var state serverModel
+	readModel(t, resp.State, &state)
+	if !state.SystemDiskType.IsNull() {
+		t.Errorf("system_disk_type = %v, want null: the API reported no disk type", state.SystemDiskType)
+	}
+	if !state.NetworkBandwidthMbps.IsNull() {
+		t.Errorf("network_bandwidth_mbps = %v, want null: no interface reported a bandwidth",
+			state.NetworkBandwidthMbps)
+	}
+}
+
+// assertServerBodyOmits checks the wire form the test above depends on: the
+// field is absent from the answer, not present and null. Reading the DTO instead
+// of the body would prove nothing — this is what says the fake still reproduces
+// what the platform sends.
+func assertServerBodyOmits(t *testing.T, api *fakeAPI, serverID int, field string) {
+	t.Helper()
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/vmware/servers/%d", api.URL, serverID))
+	if err != nil {
+		t.Fatalf("reading server %d from the fake: %v", serverID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var body struct {
+		Server map[string]json.RawMessage `json:"server"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding the fake's answer: %v", err)
+	}
+	if _, present := body.Server[field]; present {
+		t.Fatalf("the fake answers with %q; the platform omits it, and a test on the DTO's shape "+
+			"would not reach the branch this covers", field)
 	}
 }
 
