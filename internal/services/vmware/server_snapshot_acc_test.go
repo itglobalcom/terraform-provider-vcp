@@ -3,6 +3,7 @@ package vmware_test
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -121,8 +122,11 @@ func TestAccVmwareServerSnapshot_secondIsRefused(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: testAccServerSnapshotConfig(t, name, "first")},
 			{
-				Config:      testAccServerSnapshotPairConfig(t, name),
-				ExpectError: regexpAny(),
+				Config: testAccServerSnapshotPairConfig(t, name),
+				// The provider's own refusal, matched by its wording: an
+				// unreachable stand or an empty catalog would satisfy "any
+				// diagnostic" just as well.
+				ExpectError: regexp.MustCompile(`VMware Server Already Has A Snapshot`),
 			},
 		},
 	})

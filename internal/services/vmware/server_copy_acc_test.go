@@ -3,6 +3,7 @@ package vmware_test
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -89,9 +90,12 @@ func TestAccVmwareServerCopy_refusesOrderArguments(t *testing.T) {
 		CheckDestroy:             acctest.CheckVmwareServersDestroyed,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccServerCopyWithImageConfig(t, name),
-				PlanOnly:    true,
-				ExpectError: regexpAny(),
+				Config:   testAccServerCopyWithImageConfig(t, name),
+				PlanOnly: true,
+				// The provider's own refusal, matched by its wording: an
+				// unreachable stand or an empty catalog would satisfy "any
+				// diagnostic" just as well.
+				ExpectError: regexp.MustCompile(`Argument Not Accepted By A Copy`),
 			},
 		},
 	})
