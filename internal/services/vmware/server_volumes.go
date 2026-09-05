@@ -238,7 +238,13 @@ func syncServerVolumes(ctx context.Context, client *sdk.CloudClient, serverID in
 		byNumber[vol.Number.ValueInt64()] = vol
 	}
 
-	applied := make([]serverVolumeModel, 0, len(planned))
+	// A configuration without a `volumes` block leaves the attribute null. Handing
+	// back an empty slice would turn it into an empty list, and Terraform rejects
+	// that as an inconsistent result after apply.
+	var applied []serverVolumeModel
+	if planned != nil {
+		applied = make([]serverVolumeModel, 0, len(planned))
+	}
 	kept := map[int64]bool{}
 
 	for _, want := range planned {

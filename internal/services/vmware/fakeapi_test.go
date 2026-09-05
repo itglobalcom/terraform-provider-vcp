@@ -180,6 +180,7 @@ var (
 	serverSnapshotPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/snapshot$`)
 	serverCopyPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/copy$`)
 	serverPath         = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
+	serverNamePath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
 	taskPath           = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
 )
 
@@ -230,6 +231,8 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleServerSnapshot(w, r)
 	case serverCopyPath.MatchString(r.URL.Path):
 		a.handleServerCopy(w, r)
+	case serverNamePath.MatchString(r.URL.Path):
+		a.handleServerRename(w, r)
 	case serverPath.MatchString(r.URL.Path):
 		a.handleServer(w, r)
 	case networkPath.MatchString(r.URL.Path):
@@ -428,6 +431,30 @@ func (a *fakeAPI) handleServerFirewall(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
 	}
+}
+
+func (a *fakeAPI) handleServerRename(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverNamePath.FindStringSubmatch(r.URL.Path)[1])
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "the request body is not formatted or not specified")
+		return
+	}
+
+	a.mu.Lock()
+	server, ok := a.servers[id]
+	if ok {
+		server.Name = body.Name
+	}
+	a.mu.Unlock()
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	a.writeJSON(w, map[string]any{})
 }
 
 func (a *fakeAPI) handleServer(w http.ResponseWriter, r *http.Request) {
