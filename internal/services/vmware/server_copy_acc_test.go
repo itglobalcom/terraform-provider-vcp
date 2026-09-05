@@ -120,13 +120,17 @@ resource "vcp_vmware_server" "copy" {
 // Memory, not CPU: the catalogue image reports memory_hot_add but not
 // cpu_hot_add, so the platform refuses a CPU change on a running machine and the
 // step would measure the image's capability instead of the resource's behaviour.
+//
+// The size is the source's plus a gigabyte, not a number: the source is sized
+// from the catalog, so a fixed value is a no-op on a stand whose image asks for
+// exactly it — and below the image's minimum on a stand that asks for more.
 func testAccServerCopyResizedConfig(t *testing.T, name string) string {
 	t.Helper()
 	return catalogConfig(t) + serverConfig(t, "test", name, "") + fmt.Sprintf(`
 resource "vcp_vmware_server" "copy" {
   copy_from_server_id = vcp_vmware_server.test.id
   name                = %q
-  ram_mb              = 2048
+  ram_mb              = local.ram_mb + 1024
 }
 `, name+"-copy")
 }

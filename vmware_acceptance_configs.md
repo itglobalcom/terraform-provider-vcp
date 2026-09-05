@@ -609,7 +609,7 @@ resource "vcp_vmware_server" "test" {
 resource "vcp_vmware_server" "copy" {
   copy_from_server_id = vcp_vmware_server.test.id
   name                = "test-acc-vmw-syntax-copy"
-  ram_mb              = 2048
+  ram_mb              = local.ram_mb + 1024
 }
 ```
 
