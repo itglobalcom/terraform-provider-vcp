@@ -43,7 +43,7 @@ func TestAccVmwareServerSnapshot_lifecycle(t *testing.T) {
 					statecheck.ExpectKnownValue(snapshotResourceName, tfjsonpath.New("name"),
 						knownvalue.StringExact("before-upgrade")),
 				},
-				Check: checkVmwareSnapshotName(&serverID, "before-upgrade"),
+				Check: checkVmwareSnapshotName("before-upgrade"),
 			},
 			// A perpetual diff straight after create is the commonest defect and
 			// invisible without this step.
@@ -65,7 +65,7 @@ func TestAccVmwareServerSnapshot_lifecycle(t *testing.T) {
 					},
 				},
 				Check: resource.ComposeTestCheckFunc(
-					checkVmwareSnapshotName(&serverID, "after-upgrade"),
+					checkVmwareSnapshotName("after-upgrade"),
 					// Replacing the snapshot must not have replaced the machine.
 					checkServerIDUnchanged("vcp_vmware_server.test", &serverID),
 				),
@@ -161,14 +161,20 @@ resource "vcp_vmware_server_snapshot" "second" {
 // checkVmwareSnapshotName asserts, straight from the API, that the server holds
 // a snapshot under the expected name. After a replacement this is what tells the
 // new snapshot from the old one still being reported.
-func checkVmwareSnapshotName(serverID *string, want string) resource.TestCheckFunc {
-	return func(*terraform.State) error {
-		snapshot, err := acctest.GetTestClient().GetVmwareSnapshot(context.Background(), mustAtoiErr(*serverID))
+func checkVmwareSnapshotName(want string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		// The id comes from the state of this very step: ConfigStateChecks run
+		// after Check, so a pointer they fill is still empty here.
+		serverID, err := intAttr(state, "vcp_vmware_server.test", "id")
 		if err != nil {
-			return fmt.Errorf("reading the snapshot of server %s: %w", *serverID, err)
+			return err
+		}
+		snapshot, err := acctest.GetTestClient().GetVmwareSnapshot(context.Background(), serverID)
+		if err != nil {
+			return fmt.Errorf("reading the snapshot of server %d: %w", serverID, err)
 		}
 		if snapshot.Name != want {
-			return fmt.Errorf("server %s holds a snapshot named %q, want %q", *serverID, snapshot.Name, want)
+			return fmt.Errorf("server %d holds a snapshot named %q, want %q", serverID, snapshot.Name, want)
 		}
 		return nil
 	}

@@ -11,6 +11,7 @@ package vmware_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -153,7 +154,9 @@ func (c captureAttrCheck) CheckState(_ context.Context, req statecheck.CheckStat
 			return
 		}
 		*c.dst = v
-	case float64: // numbers arrive from the JSON state as float64
+	case json.Number: // the test framework decodes the state with UseJSONNumber
+		*c.dst = v.String()
+	case float64: // a plain decoder would give float64 instead
 		*c.dst = strconv.FormatInt(int64(v), 10)
 	default:
 		resp.Error = fmt.Errorf("attribute %q of %s is neither a string nor a number: %v", c.attribute, c.address, value)

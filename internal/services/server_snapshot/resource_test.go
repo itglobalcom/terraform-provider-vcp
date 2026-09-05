@@ -10,6 +10,7 @@ package server_snapshot_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -324,10 +325,18 @@ func (captureIDsCheck) CheckState(_ context.Context, req statecheck.CheckStateRe
 		resp.Error = fmt.Errorf("%s has no server_id in state", snapshotResourceName)
 		return
 	}
-	// Numbers arrive from the JSON state as float64.
-	id, ok := res.AttributeValues["id"].(float64)
+	// The test framework decodes the state with json.Number (UseJSONNumber),
+	// so a number attribute is not a float64 here.
+	raw, ok := res.AttributeValues["id"].(json.Number)
 	if !ok {
-		resp.Error = fmt.Errorf("%s has no numeric id in state", snapshotResourceName)
+		resp.Error = fmt.Errorf("%s has no numeric id in state, got %T",
+			snapshotResourceName, res.AttributeValues["id"])
+		return
+	}
+	id, err := raw.Int64()
+	if err != nil {
+		resp.Error = fmt.Errorf("%s has a non-integer id %q in state: %w",
+			snapshotResourceName, raw.String(), err)
 		return
 	}
 	capturedServerID, capturedSnapshotID = serverID, int(id)

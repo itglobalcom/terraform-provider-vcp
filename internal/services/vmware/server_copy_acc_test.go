@@ -48,8 +48,8 @@ func TestAccVmwareServerCopy_lifecycle(t *testing.T) {
 					statecheck.ExpectKnownValue(copyResourceName, tfjsonpath.New("system_disk_mb"), knownvalue.NotNull()),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					checkCopyIsItsOwnMachine(&sourceID, &copyID, name+"-copy"),
-					checkCopyMatchesSource(&sourceID, &copyID),
+					checkCopyIsItsOwnMachine(name+"-copy"),
+					checkCopyMatchesSource(),
 				),
 			},
 			// A copy has to plan empty like anything else — and a create-only
@@ -147,17 +147,27 @@ resource "vcp_vmware_server" "copy" {
 // checkCopyIsItsOwnMachine asserts, from the API, that the copy is a separate
 // server under the name it was asked for. State agreeing with itself would pass
 // a provider that recorded the source's id and copied nothing.
-func checkCopyIsItsOwnMachine(sourceID, copyID *string, wantName string) resource.TestCheckFunc {
-	return func(*terraform.State) error {
-		if *copyID == *sourceID {
-			return fmt.Errorf("the copy is recorded under the source's id %s", *sourceID)
-		}
-		server, err := acctest.GetTestClient().GetVmwareServer(context.Background(), mustAtoiErr(*copyID))
+func checkCopyIsItsOwnMachine(wantName string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		// The ids come from the state of this very step: ConfigStateChecks run
+		// after Check, so pointers they fill are still empty here.
+		source, err := intAttr(state, "vcp_vmware_server.test", "id")
 		if err != nil {
-			return fmt.Errorf("reading the copy %s: %w", *copyID, err)
+			return err
+		}
+		copyIDValue, err := intAttr(state, copyResourceName, "id")
+		if err != nil {
+			return err
+		}
+		if copyIDValue == source {
+			return fmt.Errorf("the copy is recorded under the source's id %d", source)
+		}
+		server, err := acctest.GetTestClient().GetVmwareServer(context.Background(), copyIDValue)
+		if err != nil {
+			return fmt.Errorf("reading the copy %d: %w", copyIDValue, err)
 		}
 		if server.Name != wantName {
-			return fmt.Errorf("the copy %s is named %q, want %q", *copyID, server.Name, wantName)
+			return fmt.Errorf("the copy %d is named %q, want %q", copyIDValue, server.Name, wantName)
 		}
 		return nil
 	}
@@ -166,16 +176,24 @@ func checkCopyIsItsOwnMachine(sourceID, copyID *string, wantName string) resourc
 // checkCopyMatchesSource asserts the copy carries the source's specification —
 // which is the whole point of the operation, and the reason the order-time
 // arguments are refused beside it.
-func checkCopyMatchesSource(sourceID, copyID *string) resource.TestCheckFunc {
-	return func(*terraform.State) error {
-		client := acctest.GetTestClient()
-		source, err := client.GetVmwareServer(context.Background(), mustAtoiErr(*sourceID))
+func checkCopyMatchesSource() resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		sourceID, err := intAttr(state, "vcp_vmware_server.test", "id")
 		if err != nil {
-			return fmt.Errorf("reading the source %s: %w", *sourceID, err)
+			return err
 		}
-		copied, err := client.GetVmwareServer(context.Background(), mustAtoiErr(*copyID))
+		copyID, err := intAttr(state, copyResourceName, "id")
 		if err != nil {
-			return fmt.Errorf("reading the copy %s: %w", *copyID, err)
+			return err
+		}
+		client := acctest.GetTestClient()
+		source, err := client.GetVmwareServer(context.Background(), sourceID)
+		if err != nil {
+			return fmt.Errorf("reading the source %d: %w", sourceID, err)
+		}
+		copied, err := client.GetVmwareServer(context.Background(), copyID)
+		if err != nil {
+			return fmt.Errorf("reading the copy %d: %w", copyID, err)
 		}
 		if copied.CPU != source.CPU || copied.RamMB != source.RamMB || copied.SystemDiskMB != source.SystemDiskMB {
 			return fmt.Errorf("the copy is %d vCPU / %d MB / %d MB disk, the source is %d / %d / %d",
