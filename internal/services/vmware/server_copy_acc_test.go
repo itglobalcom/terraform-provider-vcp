@@ -114,15 +114,19 @@ resource "vcp_vmware_server" "copy" {
 `, name+"-copy")
 }
 
-// testAccServerCopyResizedConfig gives the copy a CPU count of its own, which is
+// testAccServerCopyResizedConfig gives the copy more memory of its own, which is
 // the ordinary in-place change every other server takes.
+//
+// Memory, not CPU: the catalogue image reports memory_hot_add but not
+// cpu_hot_add, so the platform refuses a CPU change on a running machine and the
+// step would measure the image's capability instead of the resource's behaviour.
 func testAccServerCopyResizedConfig(t *testing.T, name string) string {
 	t.Helper()
 	return catalogConfig(t) + serverConfig(t, "test", name, "") + fmt.Sprintf(`
 resource "vcp_vmware_server" "copy" {
   copy_from_server_id = vcp_vmware_server.test.id
   name                = %q
-  cpu                 = 2
+  ram_mb              = 2048
 }
 `, name+"-copy")
 }
