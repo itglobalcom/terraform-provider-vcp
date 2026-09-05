@@ -204,6 +204,40 @@ func TestDumpAcceptanceConfigs(t *testing.T) {
 		t.Skip("set VMWARE_CONFIG_DUMP=<file> to write the acceptance configurations out")
 	}
 
+	doc := renderAcceptanceConfigs(t)
+
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+	t.Logf("wrote %s", path)
+}
+
+// acceptanceConfigsDoc is the generated document, relative to the package
+// directory `go test` runs in.
+const acceptanceConfigsDoc = "../../../vmware_acceptance_configs.md"
+
+// TestAcceptanceConfigsDocIsCurrent keeps the generated document from drifting
+// away from the tests it is generated from. Nothing else notices: `make
+// docs-generate` covers `docs/` only, and `make validate-configs` reads the
+// committed HCL without asking where it came from — so a changed configuration
+// used to leave the document describing the previous one.
+func TestAcceptanceConfigsDocIsCurrent(t *testing.T) {
+	committed, err := os.ReadFile(acceptanceConfigsDoc)
+	if err != nil {
+		t.Fatalf("reading %s: %v", acceptanceConfigsDoc, err)
+	}
+	if string(committed) != renderAcceptanceConfigs(t) {
+		t.Fatalf("%s is stale — regenerate it:\n"+
+			"\tVMWARE_CONFIG_DUMP=$PWD/vmware_acceptance_configs.md go test ./internal/services/vmware -run TestDumpAcceptanceConfigs",
+			acceptanceConfigsDoc)
+	}
+}
+
+// renderAcceptanceConfigs builds the document from the fixtures. Both the writer
+// and the drift check go through it, so neither can describe a different set.
+func renderAcceptanceConfigs(t *testing.T) string {
+	t.Helper()
+
 	fixtures := configFixtures(t)
 
 	var doc strings.Builder
@@ -221,11 +255,7 @@ func TestDumpAcceptanceConfigs(t *testing.T) {
 		formatted := hclwrite.Format([]byte(strings.TrimLeft(fixture.Config, "\n")))
 		fmt.Fprintf(&doc, "## %s\n\n%s\n\n```hcl\n%s```\n\n", fixture.Label, fixture.Note, formatted)
 	}
-
-	if err := os.WriteFile(path, []byte(doc.String()), 0o644); err != nil {
-		t.Fatalf("writing %s: %v", path, err)
-	}
-	t.Logf("wrote %d configurations to %s", len(fixtures), path)
+	return doc.String()
 }
 
 // anchor turns a fixture label into the id GitHub gives its heading.
