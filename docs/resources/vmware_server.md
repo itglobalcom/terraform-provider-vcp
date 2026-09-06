@@ -102,7 +102,7 @@ resource "vcp_vmware_server" "web_clone" {
 - `computer_name` (String) Guest OS hostname. If omitted, the platform derives one.
 
 The backend normalises this value to **UPPERCASE** (review SRV-3); the provider treats `computer_name` case-insensitively, so writing it in any case does not cause a perpetual diff.
-- `copy_from_server_id` (Number) Create the server as a copy of an existing one instead of ordering it from an image. The copy takes its whole specification from the source, so name is the only other argument it accepts. Changing this forces recreation.
+- `copy_from_server_id` (Number) Create the server as a copy of an existing one instead of ordering it from an image. The copy takes its whole specification from the source, so name is the only other argument it accepts. Changing this forces recreation. Some platform installations refuse to copy a running machine and answer "The server is required to be powered off" — power the source off before the apply if yours does.
 - `cpu` (Number) Number of vCPUs. Required when ordering a server; a copy inherits the source's.
 - `gpu` (Attributes) GPU profile. Changing this forces recreation. (see [below for nested schema](#nestedatt--gpu))
 - `image_id` (Number) OS image/template ID. Required when ordering a server; a copy (copy_from_server_id) carries the image of its source. Changing this forces recreation.

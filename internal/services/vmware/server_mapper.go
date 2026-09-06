@@ -1,6 +1,8 @@
 package vmware
 
 import (
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/itglobalcom/vstack-cloud-panel-sdk/entities"
@@ -81,10 +83,17 @@ func mapServerComputed(m *serverModel, s *entities.VmwareServer) {
 		m.NetworkBandwidthMbps = types.Int64Null()
 	}
 
-	if s.ComputerName != nil {
-		m.ComputerName = types.StringValue(*s.ComputerName)
-	} else {
+	// SRV-3: the platform stores the guest hostname upper-cased and reports it that
+	// way. Overwriting the caller's spelling with it fails the apply outright —
+	// "computer_name: was cty.StringVal(\"web01\"), but now cty.StringVal(\"WEB01\")" —
+	// so a value that differs only by case is kept as the caller wrote it. Anything
+	// else is a real change and is recorded.
+	switch {
+	case s.ComputerName == nil:
 		m.ComputerName = types.StringNull()
+	case isSet(m.ComputerName) && strings.EqualFold(m.ComputerName.ValueString(), *s.ComputerName):
+	default:
+		m.ComputerName = types.StringValue(*s.ComputerName)
 	}
 	// system_disk_type is Optional+Computed+RequiresReplace, and a read really can
 	// omit it: the server's disk type is a nullable link, and the API drops null

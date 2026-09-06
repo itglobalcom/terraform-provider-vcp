@@ -112,7 +112,9 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Description: "Create the server as a copy of an existing one instead of ordering it from an " +
 					"image. The copy takes its whole specification from the source, so name is the only other " +
-					"argument it accepts. Changing this forces recreation.",
+					"argument it accepts. Changing this forces recreation. Some platform installations refuse " +
+					"to copy a running machine and answer \"The server is required to be powered off\" — " +
+					"power the source off before the apply if yours does.",
 				PlanModifiers: requiresReplaceInt,
 				Validators:    []validator.Int64{int64validator.AtLeast(1)},
 			},
