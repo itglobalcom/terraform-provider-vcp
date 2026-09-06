@@ -101,7 +101,9 @@ func (r *edgeFirewallResource) Schema(_ context.Context, _ resource.SchemaReques
 						},
 						"source_port": schema.StringAttribute{
 							MarkdownDescription: "Source port: `any`, a port (`443`), a range (`1000-2000`) or a " +
-								"comma-separated list. Defaults to `any`.",
+								"comma-separated list. Defaults to `any`. An edge backed by NSX-T accepts " +
+								"only `any` here, whatever the protocol; one backed by NSX-V accepts a value " +
+								"for every protocol except `icmp` and `any`.",
 							Optional:   true,
 							Computed:   true,
 							Validators: []validator.String{vmwareRulePort()},
@@ -245,9 +247,13 @@ func (r *edgeFirewallResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 	}
 
-	tflog.Info(ctx, "Disabling VMware edge firewall and clearing its rules",
+	// The rules go, the firewall stays on: an edge backed by NSX-T refuses to be
+	// switched off at all ("The firewall cannot be disabled"), which used to make
+	// destroy impossible there. Leaving it on is also the safer of the two — the
+	// edge keeps filtering by its default action instead of passing everything.
+	tflog.Info(ctx, "Clearing the rules of the VMware edge firewall",
 		map[string]any{"network_id": networkID, "rules": len(state.Rules)})
-	r.apply(ctx, networkID, nil, nil, false, &resp.Diagnostics)
+	r.apply(ctx, networkID, nil, nil, true, &resp.Diagnostics)
 }
 
 // ImportState takes the network id; Read fills in default_action and the rules.

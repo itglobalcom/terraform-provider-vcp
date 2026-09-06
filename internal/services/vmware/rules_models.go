@@ -88,10 +88,10 @@ func expandEdgeFirewallRules(in []edgeFirewallRuleModel) []entities.VmwareUpdate
 			Name:            optionalString(r.Name),
 			Action:          r.Action.ValueString(),
 			Protocol:        optionalString(r.Protocol),
-			Source:          optionalString(r.Source),
-			SourcePort:      optionalString(r.SourcePort),
-			Destination:     optionalString(r.Destination),
-			DestinationPort: optionalString(r.DestinationPort),
+			Source:          anyOrValue(r.Source),
+			SourcePort:      anyOrValue(r.SourcePort),
+			Destination:     anyOrValue(r.Destination),
+			DestinationPort: anyOrValue(r.DestinationPort),
 		})
 	}
 	return out
@@ -187,6 +187,17 @@ func addressOrAny(v types.String) string {
 		return entities.VmwareEdgeFirewallAny
 	}
 	return v.ValueString()
+}
+
+// anyOrValue is addressOrAny for a wire field the API declares as a pointer.
+//
+// Every address and port of a firewall rule is required by the contract
+// (ServerFirewallRuleDto marks all four [EncodedRequired]), so an unset one is
+// sent as "any" rather than omitted: omitting it fails the request with
+// "The firewall source is required" instead of meaning "no restriction".
+func anyOrValue(v types.String) *string {
+	s := addressOrAny(v)
+	return &s
 }
 
 func flattenEdgeNATRules(in []entities.VmwareEdgeNATRule) []edgeNATRuleModel {
@@ -303,10 +314,10 @@ func expandServerFirewallRules(in []serverFirewallRuleModel) []entities.VmwareSe
 			TrafficDirection: r.TrafficDirection.ValueString(),
 			Action:           r.Action.ValueString(),
 			Protocol:         r.Protocol.ValueString(),
-			Source:           optionalString(r.Source),
-			SourcePort:       optionalString(r.SourcePort),
-			Destination:      optionalString(r.Destination),
-			DestinationPort:  optionalString(r.DestinationPort),
+			Source:           anyOrValue(r.Source),
+			SourcePort:       anyOrValue(r.SourcePort),
+			Destination:      anyOrValue(r.Destination),
+			DestinationPort:  anyOrValue(r.DestinationPort),
 		})
 	}
 	return out

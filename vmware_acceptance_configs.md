@@ -1030,7 +1030,7 @@ resource "vcp_vmware_edge_firewall" "test" {
       action           = "allow"
       protocol         = "tcp"
       source           = "203.0.113.0/24"
-      source_port      = "1024-65535"
+      source_port      = "any"
       destination      = "10.233.1.0/24"
       destination_port = "22"
     },
