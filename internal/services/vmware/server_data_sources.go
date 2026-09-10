@@ -28,6 +28,7 @@ type dsServerModel struct {
 	State            types.String `tfsdk:"state"`
 	IsPowerOn        types.Bool   `tfsdk:"is_power_on"`
 	VmToolsInstalled types.Bool   `tfsdk:"vm_tools_installed"`
+	NestedHypervisor types.Bool   `tfsdk:"nested_hypervisor"`
 	Gpu              types.Object `tfsdk:"gpu"`
 	Nics             types.List   `tfsdk:"nics"`
 	Created          types.String `tfsdk:"created"`
@@ -49,6 +50,7 @@ func mapServerToDSModel(s *entities.VmwareServer) dsServerModel {
 		State:            m.State,
 		IsPowerOn:        m.IsPowerOn,
 		VmToolsInstalled: m.VmToolsInstalled,
+		NestedHypervisor: m.NestedHypervisor,
 		Gpu:              m.Gpu,
 		Nics:             m.Nics,
 		Created:          m.Created,
@@ -102,9 +104,11 @@ func dsServerAttributes(computedID bool) map[string]schema.Attribute {
 		"state":              schema.StringAttribute{Computed: true},
 		"is_power_on":        schema.BoolAttribute{Computed: true},
 		"vm_tools_installed": schema.BoolAttribute{Computed: true},
-		"gpu":                gpu,
-		"nics":               nics,
-		"created":            schema.StringAttribute{Computed: true},
+		"nested_hypervisor": schema.BoolAttribute{Computed: true,
+			Description: "Whether the guest OS may run its own hypervisor — the Nested hypervisor setting."},
+		"gpu":     gpu,
+		"nics":    nics,
+		"created": schema.StringAttribute{Computed: true},
 	}
 }
 

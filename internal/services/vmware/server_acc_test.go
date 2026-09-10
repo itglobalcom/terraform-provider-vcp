@@ -228,6 +228,80 @@ func TestAccVmwareServer_disappears(t *testing.T) {
 	})
 }
 
+// TestAccVmwareServer_nestedHypervisor covers ordering with the setting on,
+// switching it off in place, import, and an out-of-band change in the panel.
+//
+// nested_hypervisor is Optional+Computed: without UseStateForUnknown it plans
+// as "known after apply" on every run, and a diff here is a power cycle. The
+// switch edits the machine in place — a replacement would destroy the disk —
+// so the id is asserted unchanged afterwards.
+func TestAccVmwareServer_nestedHypervisor(t *testing.T) {
+	resourceName := "vcp_vmware_server.test"
+	name := testName("nested")
+
+	var serverID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheckVmwareServer(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             acctest.CheckVmwareServersDestroyed,
+		Steps: []resource.TestStep{
+			// Ordered with the guest allowed a hypervisor of its own.
+			{
+				Config: testAccServerNestedHypervisorConfig(t, name, true),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(resourceName,
+						tfjsonpath.New("nested_hypervisor"), knownvalue.Bool(true)),
+					captureAttr(resourceName, "id", &serverID),
+				},
+				// And the machine itself says so, not only the state file.
+				Check: checkServerNestedHypervisor(resourceName, true),
+			},
+			// Nothing changed. Without this step the perpetual diff is invisible.
+			{Config: testAccServerNestedHypervisorConfig(t, name, true), PlanOnly: true},
+			// Switched off: an edit of the same machine, never a replacement.
+			{
+				PreConfig: waitForBackend,
+				Config:    testAccServerNestedHypervisorConfig(t, name, false),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(resourceName,
+						tfjsonpath.New("nested_hypervisor"), knownvalue.Bool(false)),
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// The same machine: the id it was created with.
+					resource.TestCheckResourceAttrPtr(resourceName, "id", &serverID),
+					checkServerNestedHypervisor(resourceName, false),
+				),
+			},
+			// Settled again after the edit.
+			{Config: testAccServerNestedHypervisorConfig(t, name, false), PlanOnly: true},
+			// The API reports the setting, so import verifies it (it is deliberately
+			// absent from serverImportIgnores).
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: serverImportIgnores,
+			},
+			// Switched on in the panel: the refresh must see the drift.
+			{
+				PreConfig: func() {
+					waitForBackend()
+					setNestedHypervisorOutOfBand(t, serverID, true)
+				},
+				Config:             testAccServerNestedHypervisorConfig(t, name, false),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
 // TestAccVmwareServer_dataSources covers the read-only side a user reaches for
 // before writing any resource: what locations exist, which images they carry,
 // what GPU profiles are on offer — and, once a machine exists, finding it again
@@ -319,6 +393,24 @@ resource "vcp_vmware_server" "test" {
   system_disk_type = local.disk_type.title
 }
 `, vmwareLocationID(t), name, computerName, vmwareImageID(t))
+}
+
+// testAccServerNestedHypervisorConfig is one configuration with a single value
+// changed between the two states: switching the attribute is an in-place edit.
+func testAccServerNestedHypervisorConfig(t *testing.T, name string, enabled bool) string {
+	t.Helper()
+	return catalogConfig(t) + fmt.Sprintf(`
+resource "vcp_vmware_server" "test" {
+  location_id       = %[1]s
+  name              = %[2]q
+  image_id          = %[3]s
+  cpu               = 1
+  ram_mb            = local.ram_mb
+  system_disk_mb    = local.system_disk_mb
+  system_disk_type  = local.disk_type.title
+  nested_hypervisor = %[4]t
+}
+`, vmwareLocationID(t), name, vmwareImageID(t), enabled)
 }
 
 func testAccServerDataSourcesConfig(t *testing.T, name string) string {

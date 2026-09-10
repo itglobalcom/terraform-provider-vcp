@@ -56,3 +56,13 @@ be mixed). The API serializes changes per object while Terraform applies in para
 mutating path locks its **parent** (`internal/locks`). A rule set belongs to one resource whole (an
 empty list clears it); `Optional + Computed` is for what the platform supplies; a field the API takes
 and ignores is not worth having; a nested attribute's schema and its `attr.Type` map must agree.
+Two attributes of one resource that the platform cannot hold at once are refused at plan time in
+that resource's `ValidateConfig` — an `AddAttributeError` on the attribute to drop, covered by a
+unit test — rather than left to the API to refuse mid-apply. Today the only resource doing that is
+`internal/services/vmware/server_resource.go` (`public_network_id` × `network_bandwidth_mbps`,
+`gpu` × `nested_hypervisor`); both sides of such a pair should name the conflict in their schema
+description, and `gpu` still does not. `ValidateConfig` is neither only for conflicts nor
+everywhere: nine of the twenty registered resources have one, the other eight covering what a type
+requires or forbids, uniqueness within a set, or the size of a rule set. No data source has one —
+`internal/services/vmware/server_data_sources.go` refuses `id` together with `name` in its `Read`
+instead.

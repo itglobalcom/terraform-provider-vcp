@@ -79,6 +79,10 @@ func configFixtures(t *testing.T) []configFixture {
 			testAccServerByNameConfig(t, name)},
 		{"server/bandwidth", "TestAccVmwareServer_bandwidthInPlace — the bandwidth of the interface the machine is born with.",
 			testAccServerBandwidthConfig(t, name, 10)},
+		{"server/nestedHypervisorOn", "TestAccVmwareServer_nestedHypervisor — ordered with the guest allowed a hypervisor of its own.",
+			testAccServerNestedHypervisorConfig(t, name, true)},
+		{"server/nestedHypervisorOff", "TestAccVmwareServer_nestedHypervisor — the same machine with nested virtualization switched off in place.",
+			testAccServerNestedHypervisorConfig(t, name, false)},
 
 		// ---------- Disks ----------
 		{"volumes/one", "TestAccVmwareServerVolumes_lifecycle — one data disk beside the boot disk.",

@@ -49,8 +49,8 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 	resp.Schema = schema.Schema{
 		Description: "Manages a VMware Cloud server (virtual machine).",
 		MarkdownDescription: "Manages a VMware Cloud server.\n\n" +
-			"`cpu`, `ram_mb`, `system_disk_mb`, `network_bandwidth_mbps`, `name`, `computer_name` and `volumes` " +
-			"are changed in place. Everything else replaces the machine.\n\n" +
+			"`cpu`, `ram_mb`, `system_disk_mb`, `network_bandwidth_mbps`, `name`, `computer_name`, " +
+			"`nested_hypervisor` and `volumes` are changed in place. Everything else replaces the machine.\n\n" +
 			"~> **Changing `image_id` destroys the server and creates another one** — with a new id, a new address " +
 			"and an empty disk. There is no way to reinstall a machine in place, so a plan that shows a " +
 			"replacement here is a plan that loses the data. `location_id`, `system_disk_type`, " +
@@ -231,6 +231,26 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					"card_count": schema.Int64Attribute{Required: true, Description: "Number of GPU cards."},
 				},
 			},
+			// Optional+Computed like computer_name; UseStateForUnknown keeps a machine
+			// ordered without the attribute from planning "known after apply" on every
+			// run — the classic perpetual diff.
+			"nested_hypervisor": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Whether the guest OS may run its own hypervisor — the Nested hypervisor setting. " +
+					"Editable in place; switching it restarts a running machine. Cannot be combined with gpu, " +
+					"and the location must offer a VDC that supports it (nested_hypervisor_supported in " +
+					"vcp_vmware_locations).",
+				MarkdownDescription: "Whether the guest operating system may run its own hypervisor — the " +
+					"**Nested hypervisor** setting, what the panel calls exposing hardware-assisted CPU " +
+					"virtualization to the guest OS. Off unless asked for, and editable in place.\n\n" +
+					"~> **Switching this restarts a running machine.** The platform powers the guest off, changes " +
+					"the setting and powers it back on; a machine that is already off stays off.\n\n" +
+					"~> It cannot be combined with `gpu`, and the location has to offer a VDC that supports it — " +
+					"`nested_hypervisor_supported` in `vcp_vmware_locations`. Both refusals come from the " +
+					"platform, and the first one is reported at plan time.",
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
 			"volumes":            serverVolumesAttribute(),
 			"state":              schema.StringAttribute{Computed: true, Description: "Server lifecycle state."},
 			"is_power_on":        schema.BoolAttribute{Computed: true, Description: "Whether the server is powered on."},
@@ -268,8 +288,9 @@ func (r *serverResource) Configure(_ context.Context, req resource.ConfigureRequ
 
 // ValidateConfig reports what the configuration can be judged on by itself:
 // attributes that describe the same interface in two ways, the order-time
-// arguments a server cannot be ordered without, and a set of disks that cannot
-// be told apart.
+// arguments a server cannot be ordered without, a machine asking for two
+// mutually exclusive platform features, and a set of disks that cannot be told
+// apart.
 func (r *serverResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config serverModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -311,6 +332,18 @@ func (r *serverResource) ValidateConfig(ctx context.Context, req resource.Valida
 				fmt.Sprintf("%s is needed to order a server. Set it, or set copy_from_server_id to create this "+
 					"machine as a copy of an existing one, which takes its specification from the source.", arg.name))
 		}
+	}
+
+	// GPU and nested virtualization are mutually exclusive on the platform;
+	// saying so here fails the plan instead of the apply.
+	gpuSet := !config.Gpu.IsNull() && !config.Gpu.IsUnknown()
+	nestedRequested := !config.NestedHypervisor.IsNull() && !config.NestedHypervisor.IsUnknown() &&
+		config.NestedHypervisor.ValueBool()
+	if gpuSet && nestedRequested {
+		resp.Diagnostics.AddAttributeError(path.Root("nested_hypervisor"), "Conflicting Attributes",
+			"gpu and nested_hypervisor cannot be used on the same server. A machine with a GPU allocation "+
+				"cannot expose hardware-assisted virtualization to its guest, so the platform refuses the order. "+
+				"Drop one of the two.")
 	}
 
 	validateServerVolumes(config.Volumes, &resp.Diagnostics)
@@ -459,6 +492,8 @@ func (r *serverResource) orderServer(ctx context.Context, plan *serverModel,
 	createReq.BackupEnabled = optionalBool(plan.BackupEnabled)
 	createReq.BackupPeriod = optionalInt(plan.BackupPeriod)
 	createReq.NeedSysprep = optionalBool(plan.NeedSysprep)
+	// Unknown means "not asked for"; the platform then orders with it off.
+	createReq.NestedHypervisor = optionalBool(plan.NestedHypervisor)
 
 	sshKeys, keyDiags := int64SetToInts(ctx, plan.SSHKeyIDs)
 	diags.Append(keyDiags...)
@@ -477,7 +512,7 @@ func (r *serverResource) orderServer(ctx context.Context, plan *serverModel,
 	tflog.Info(ctx, "Creating VMware server", map[string]any{"name": createReq.Name})
 	order, err := r.client.CreateVmwareServer(ctx, createReq)
 	if err != nil {
-		diags.AddError("Error Creating VMware Server", err.Error())
+		diags.AddError("Error Creating VMware Server", err.Error()+nestedHypervisorFailureHint(err))
 		return nil, false
 	}
 	if order.TaskID != "" {
@@ -590,6 +625,16 @@ func (r *serverResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
+	// Nested virtualization is switched in place on the existing machine. A
+	// null/unknown plan value means the attribute was dropped from the
+	// configuration — not a request to switch anything.
+	if !plan.NestedHypervisor.Equal(state.NestedHypervisor) &&
+		!plan.NestedHypervisor.IsNull() && !plan.NestedHypervisor.IsUnknown() {
+		if !r.switchNestedHypervisor(ctx, serverID, plan.NestedHypervisor.ValueBool(), &resp.Diagnostics) {
+			return
+		}
+	}
+
 	server, err := r.client.GetVmwareServer(ctx, serverID)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Reading Updated VMware Server", err.Error())
@@ -647,6 +692,61 @@ func (r *serverResource) updatePrimaryNICBandwidth(ctx context.Context, serverID
 		return false
 	}
 	return true
+}
+
+// switchNestedHypervisor turns nested virtualization on or off in place. The
+// platform power-cycles a running guest and answers a request matching the
+// current state with no task at all — success with nothing to await.
+func (r *serverResource) switchNestedHypervisor(ctx context.Context, serverID int, enable bool,
+	diags *diag.Diagnostics) bool {
+	verb := "disable"
+	if enable {
+		verb = "enable"
+	}
+	tflog.Info(ctx, "Switching nested virtualization on a VMware server", map[string]any{
+		"server_id": serverID, "nested_hypervisor": enable,
+	})
+
+	var (
+		task *sdk.VmwareTaskID
+		err  error
+	)
+	if enable {
+		task, err = r.client.EnableVmwareServerNestedHypervisor(ctx, serverID)
+	} else {
+		task, err = r.client.DisableVmwareServerNestedHypervisor(ctx, serverID)
+	}
+	if err != nil {
+		diags.AddError("Error Switching VMware Server Nested Hypervisor",
+			fmt.Sprintf("Could not %s nested_hypervisor on server %d: %s%s",
+				verb, serverID, err.Error(), nestedHypervisorFailureHint(err)))
+		return false
+	}
+	if err := r.waitTask(ctx, task); err != nil {
+		diags.AddError("Error Awaiting VMware Server Nested Hypervisor Change",
+			fmt.Sprintf("The task that was to %s nested_hypervisor on server %d did not finish: %s",
+				verb, serverID, err.Error()))
+		return false
+	}
+	return true
+}
+
+// nestedHypervisorFailureHint turns the platform's refusals of nested
+// virtualization into something a user can act on; it returns "" for anything
+// else, so it can be appended to any error of the create and switch paths.
+func nestedHypervisorFailureHint(err error) string {
+	switch {
+	case sdk.IsVmwareOperationNotSupportedForGpuServer(err):
+		return "\n\nThe platform refuses this for a machine with a GPU allocation: gpu and nested_hypervisor " +
+			"are mutually exclusive. Order the machine without gpu, or leave nested_hypervisor off."
+	case sdk.IsVmwareNestedHypervisorNotSupportedInLocation(err):
+		return "\n\nNo VDC available to this project in that location supports the Nested hypervisor setting. Check " +
+			"nested_hypervisor_supported in vcp_vmware_locations and pick a location that reports true."
+	case sdk.IsVmwareServerSuspended(err):
+		return "\n\nThe machine is suspended, and the platform cannot change this setting on a suspended " +
+			"machine. Resume it in the panel and apply again."
+	}
+	return ""
 }
 
 // resizeFailureHint explains the refusal a user can act on: a running machine can
