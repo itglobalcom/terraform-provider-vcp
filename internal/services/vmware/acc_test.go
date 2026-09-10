@@ -11,6 +11,7 @@ package vmware_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -153,7 +154,9 @@ func (c captureAttrCheck) CheckState(_ context.Context, req statecheck.CheckStat
 			return
 		}
 		*c.dst = v
-	case float64: // numbers arrive from the JSON state as float64
+	case json.Number: // the test framework decodes the state with UseJSONNumber
+		*c.dst = v.String()
+	case float64: // a plain decoder would give float64 instead
 		*c.dst = strconv.FormatInt(int64(v), 10)
 	default:
 		resp.Error = fmt.Errorf("attribute %q of %s is neither a string nor a number: %v", c.attribute, c.address, value)
@@ -228,6 +231,23 @@ func setServerFirewallOutOfBand(t *testing.T, serverID string, rules []entities.
 	}
 }
 
+// setNestedHypervisorOutOfBand switches nested virtualization on a server behind
+// Terraform's back and waits for the saga.
+func setNestedHypervisorOutOfBand(t *testing.T, serverID string, enabled bool) {
+	t.Helper()
+	var err error
+	if enabled {
+		_, err = acctest.GetTestClient().EnableVmwareServerNestedHypervisorAndWait(
+			context.Background(), mustAtoi(t, serverID))
+	} else {
+		_, err = acctest.GetTestClient().DisableVmwareServerNestedHypervisorAndWait(
+			context.Background(), mustAtoi(t, serverID))
+	}
+	if err != nil {
+		t.Fatalf("out-of-band nested hypervisor switch failed: %v", err)
+	}
+}
+
 // deleteNetworkOutOfBand removes a network directly through the API and waits
 // until it is really gone — the delete task completes before the object does.
 func deleteNetworkOutOfBand(t *testing.T, networkID string) {
@@ -281,31 +301,44 @@ func checkNATRuleCount(networkID *string, want int) resource.TestCheckFunc {
 }
 
 // checkEdgeFirewallRuleCount asserts the edge firewall rule count from the API.
-func checkEdgeFirewallRuleCount(networkID *string, want int) resource.TestCheckFunc {
-	return func(*terraform.State) error {
-		firewall, err := acctest.GetTestClient().GetVmwareEdgeFirewall(context.Background(), mustAtoiErr(*networkID))
+//
+// The network id comes from the state of the step being checked, not from a
+// variable a ConfigStateChecks entry fills in: those run after Check, so on the
+// first step such a variable is still empty and on later ones it holds the
+// previous step's value.
+func checkEdgeFirewallRuleCount(networkResource string, want int) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		networkID, err := intAttr(state, networkResource, "id")
 		if err != nil {
-			return fmt.Errorf("reading edge firewall of network %s: %w", *networkID, err)
+			return err
+		}
+		firewall, err := acctest.GetTestClient().GetVmwareEdgeFirewall(context.Background(), networkID)
+		if err != nil {
+			return fmt.Errorf("reading edge firewall of network %d: %w", networkID, err)
 		}
 		if len(firewall.Rules) != want {
-			return fmt.Errorf("network %s has %d firewall rule(s), want %d", *networkID, len(firewall.Rules), want)
+			return fmt.Errorf("network %d has %d firewall rule(s), want %d", networkID, len(firewall.Rules), want)
 		}
 		return nil
 	}
 }
 
 // checkEdgeFirewallEnabled asserts whether the edge firewall is switched on.
-// Destroying the resource has to turn it off — the resource's existence is what
-// says it should be on.
-func checkEdgeFirewallEnabled(networkID *string, want bool) resource.TestCheckFunc {
-	return func(*terraform.State) error {
-		firewall, err := acctest.GetTestClient().GetVmwareEdgeFirewall(context.Background(), mustAtoiErr(*networkID))
+// Destroying the resource clears its rules and leaves the firewall on: an edge
+// backed by NSX-T refuses to be switched off at all.
+func checkEdgeFirewallEnabled(networkResource string, want bool) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		networkID, err := intAttr(state, networkResource, "id")
 		if err != nil {
-			return fmt.Errorf("reading edge firewall of network %s: %w", *networkID, err)
+			return err
+		}
+		firewall, err := acctest.GetTestClient().GetVmwareEdgeFirewall(context.Background(), networkID)
+		if err != nil {
+			return fmt.Errorf("reading edge firewall of network %d: %w", networkID, err)
 		}
 		got := firewall.Enabled != nil && *firewall.Enabled
 		if got != want {
-			return fmt.Errorf("edge firewall of network %s is enabled=%v, want %v", *networkID, got, want)
+			return fmt.Errorf("edge firewall of network %d is enabled=%v, want %v", networkID, got, want)
 		}
 		return nil
 	}
@@ -320,6 +353,26 @@ func checkServerFirewallRuleCount(serverID *string, want int) resource.TestCheck
 		}
 		if len(rules) != want {
 			return fmt.Errorf("server %s has %d firewall rule(s), want %d", *serverID, len(rules), want)
+		}
+		return nil
+	}
+}
+
+// checkServerNestedHypervisor asserts, straight from the API, what the machine
+// itself reports — not what the resource recorded in state.
+func checkServerNestedHypervisor(resourceName string, want bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		serverID, err := intAttr(s, resourceName, "id")
+		if err != nil {
+			return err
+		}
+		server, err := acctest.GetTestClient().GetVmwareServer(context.Background(), serverID)
+		if err != nil {
+			return fmt.Errorf("reading server %d: %w", serverID, err)
+		}
+		if server.NestedHypervisor != want {
+			return fmt.Errorf("server %d reports nested_hypervisor=%v, want %v",
+				serverID, server.NestedHypervisor, want)
 		}
 		return nil
 	}

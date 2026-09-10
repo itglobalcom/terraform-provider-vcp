@@ -24,6 +24,7 @@ import (
 	vstack_server "github.com/itglobalcom/terraform-provider-vcp/internal/services/server"
 	server_attachment "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_network_attachment"
 	server_pubif "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_public_interface"
+	server_snapshot "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_snapshot"
 	ssh_key "github.com/itglobalcom/terraform-provider-vcp/internal/services/ssh_key"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/vmware"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
@@ -219,6 +220,7 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		vstack_server.NewServerResource,
 		gateway.NewGatewayResource,
 		server_pubif.NewResource,
+		server_snapshot.NewResource,
 		server_attachment.NewResource,
 		gateway_attachment.NewResource,
 		gateway_rules.NewNATResource,
@@ -229,6 +231,7 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		vmware.NewServerResource,
 		vmware.NewServerNetworkAttachmentResource,
 		vmware.NewServerPublicInterfaceResource,
+		vmware.NewServerSnapshotResource,
 		vmware.NewServerFirewallResource,
 		vmware.NewEdgeFirewallResource,
 		vmware.NewEdgeNATResource,
@@ -251,6 +254,7 @@ func (p *CloudProvider) DataSources(ctx context.Context) []func() datasource.Dat
 		affinity.NewAffinityGroupsDataSource,
 		vstack_server.NewServerDataSource,
 		vstack_server.NewServersDataSource,
+		server_snapshot.NewSnapshotsDataSource,
 		gateway.NewGatewayDataSource,
 		gateway.NewGatewaysDataSource,
 		dns.NewDomainDataSource,

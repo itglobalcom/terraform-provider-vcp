@@ -194,10 +194,10 @@ func TestValidateServerVolumes(t *testing.T) {
 	}
 }
 
-// The server's ValidateConfig, driven the way the framework drives it. The two
+// The server's ValidateConfig, driven the way the framework drives it. The three
 // things it decides — a bandwidth that contradicts the network it is ordered on,
-// and a disk list that cannot be told apart — are both settled before anything
-// is created.
+// two mutually exclusive platform features asked for at once, and a disk list
+// that cannot be told apart — are all settled before anything is created.
 func TestServerValidateConfig(t *testing.T) {
 	res := &serverResource{}
 	s := resourceSchema(t, res)
@@ -259,6 +259,48 @@ func TestServerValidateConfig(t *testing.T) {
 		}
 	})
 
+	// The platform refuses an order that asks for both; the validator moves the
+	// failure to plan time.
+	t.Run("a GPU and a nested hypervisor are not both possible", func(t *testing.T) {
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		model.NestedHypervisor = types.BoolValue(true)
+
+		diags := validate(model)
+		if !diags.HasError() {
+			t.Fatal("gpu with nested_hypervisor must be refused at plan time")
+		}
+		if got := diags.Errors()[0].Summary(); got != "Conflicting Attributes" {
+			t.Errorf("unexpected error: %q", got)
+		}
+	})
+
+	t.Run("a GPU machine may still say nested_hypervisor = false", func(t *testing.T) {
+		// Stating the platform's default explicitly is not a conflict and must
+		// not be blocked.
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		model.NestedHypervisor = types.BoolValue(false)
+
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("nested_hypervisor = false alongside gpu must pass: %v", diags)
+		}
+	})
+
+	t.Run("either feature alone is fine", func(t *testing.T) {
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("gpu alone must pass: %v", diags)
+		}
+
+		model = base()
+		model.NestedHypervisor = types.BoolValue(true)
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("nested_hypervisor alone must pass: %v", diags)
+		}
+	})
+
 	t.Run("the disk list is checked too", func(t *testing.T) {
 		model := base()
 		model.Volumes = []serverVolumeModel{
@@ -274,4 +316,71 @@ func TestServerValidateConfig(t *testing.T) {
 			t.Errorf("unexpected error: %q", got)
 		}
 	})
+}
+
+// A server whose configuration carries no `volumes` block leaves the attribute
+// null, and an update has to leave it null: answering with an empty list fails
+// the apply with "Provider produced inconsistent result after apply ... .volumes:
+// was null, but now ListValEmpty" — after the update has already been sent.
+func TestVmwareServerUpdateKeepsVolumesNullWhenNoneAreConfigured(t *testing.T) {
+	api := newFakeAPI(t)
+	addSpecServer(api, 5679, "web-clone")
+
+	res := &serverResource{}
+	configure(t, res, api.client(t))
+	s := resourceSchema(t, res)
+
+	prior := copyServerModel(5678, "web-clone")
+	prior.ID = types.Int64Value(5679)
+	prior.LocationID = types.Int64Value(7)
+	prior.ImageID = types.Int64Value(42)
+	prior.CPU = types.Int64Value(2)
+	prior.RamMB = types.Int64Value(4096)
+	prior.SystemDiskMB = types.Int64Value(51200)
+
+	plan := prior
+	plan.Name = types.StringValue("web-clone-renamed")
+
+	resp := resource.UpdateResponse{State: stateOf(t, s, prior)}
+	res.Update(context.Background(), resource.UpdateRequest{
+		Plan:  planOf(t, s, plan),
+		State: stateOf(t, s, prior),
+	}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Update failed: %v", resp.Diagnostics)
+	}
+
+	var volumes types.List
+	resp.Diagnostics.Append(resp.State.GetAttribute(context.Background(), path.Root("volumes"), &volumes)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("reading volumes back: %v", resp.Diagnostics)
+	}
+	if !volumes.IsNull() {
+		t.Errorf("volumes = %v, want null: the configuration declares no disks", volumes)
+	}
+}
+
+// The same invariant one level down, where it is decided.
+func TestSyncServerVolumesKeepsTheNullness(t *testing.T) {
+	if got := syncServerVolumes(context.Background(), nil, 1, nil, nil, &diag.Diagnostics{}); got != nil {
+		t.Errorf("nothing planned gave %#v, want nil: an empty slice becomes an empty list", got)
+	}
+	if got := syncServerVolumes(context.Background(), nil, 1, nil, []serverVolumeModel{}, &diag.Diagnostics{}); got == nil {
+		t.Error("an empty plan gave nil; `volumes = []` is an empty list, not null")
+	}
+}
+
+// gpuObject is the `gpu` attribute a configuration would carry — the whole triple,
+// which is the only shape the API accepts.
+func gpuObject(t *testing.T, modelID, vramMB, cardCount int64) types.Object {
+	t.Helper()
+	obj, diags := types.ObjectValue(gpuAttrTypes, map[string]attr.Value{
+		"model_id":   types.Int64Value(modelID),
+		"vram_mb":    types.Int64Value(vramMB),
+		"card_count": types.Int64Value(cardCount),
+	})
+	if diags.HasError() {
+		t.Fatalf("building the gpu object: %v", diags)
+	}
+	return obj
 }

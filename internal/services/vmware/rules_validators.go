@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -276,6 +277,22 @@ func configRules[T any](ctx context.Context, config tfsdk.Config) ([]T, bool) {
 func isSet(v types.String) bool {
 	return !v.IsNull() && !v.IsUnknown()
 }
+
+// isSetInt is isSet for an integer attribute.
+func isSetInt(v types.Int64) bool {
+	return !v.IsNull() && !v.IsUnknown()
+}
+
+// isDeclared reports whether the configuration mentions an attribute at all,
+// whatever its value turns out to be.
+//
+// This is the opposite reading of unknown from isSet, and the two are not
+// interchangeable: a check on the *value* has to skip an unknown one, while a
+// check on the *presence* has to count it. A size derived from a catalog data
+// source is unknown until the data source is read, and treating that as "not
+// declared" would report a required argument missing from a configuration that
+// plainly has it.
+func isDeclared(v attr.Value) bool { return !v.IsNull() }
 
 // validateEdgeNATRules mirrors the rules the API enforces on a NAT rule, plus the
 // one it does not: NET-4, where original_ip of a DNAT rule is silently replaced

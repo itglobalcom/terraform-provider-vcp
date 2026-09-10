@@ -186,3 +186,43 @@ func TestWarnNATOrderMismatch(t *testing.T) {
 		t.Errorf("a shorter answer must not warn about order, got: %v", short)
 	}
 }
+
+// SRV-3: the platform upper-cases the guest hostname. Writing that spelling back
+// over the caller's own fails the apply with "Provider produced inconsistent
+// result after apply", so a value differing only by case is left alone.
+func TestMapServerComputedKeepsTheCallerSpellingOfComputerName(t *testing.T) {
+	upper := "WEB01"
+	server := &entities.VmwareServer{ID: 1, ComputerName: &upper}
+
+	t.Run("same name in another case is kept", func(t *testing.T) {
+		m := serverModel{ComputerName: types.StringValue("web01")}
+		mapServerComputed(&m, server)
+		if got := m.ComputerName.ValueString(); got != "web01" {
+			t.Errorf("computer_name = %q, want the caller's %q", got, "web01")
+		}
+	})
+
+	t.Run("a different name is recorded", func(t *testing.T) {
+		m := serverModel{ComputerName: types.StringValue("db01")}
+		mapServerComputed(&m, server)
+		if got := m.ComputerName.ValueString(); got != upper {
+			t.Errorf("computer_name = %q, want the reported %q", got, upper)
+		}
+	})
+
+	t.Run("nothing configured takes what the platform reports", func(t *testing.T) {
+		m := serverModel{ComputerName: types.StringNull()}
+		mapServerComputed(&m, server)
+		if got := m.ComputerName.ValueString(); got != upper {
+			t.Errorf("computer_name = %q, want the reported %q", got, upper)
+		}
+	})
+
+	t.Run("nothing reported is null", func(t *testing.T) {
+		m := serverModel{ComputerName: types.StringValue("web01")}
+		mapServerComputed(&m, &entities.VmwareServer{ID: 1})
+		if !m.ComputerName.IsNull() {
+			t.Errorf("computer_name = %v, want null: the platform reported none", m.ComputerName)
+		}
+	})
+}

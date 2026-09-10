@@ -18,6 +18,7 @@ func TestResourceSchemas(t *testing.T) {
 		"vcp_vmware_server":                    NewServerResource,
 		"vcp_vmware_server_network_attachment": NewServerNetworkAttachmentResource,
 		"vcp_vmware_server_public_interface":   NewServerPublicInterfaceResource,
+		"vcp_vmware_server_snapshot":           NewServerSnapshotResource,
 		"vcp_vmware_server_firewall":           NewServerFirewallResource,
 		"vcp_vmware_edge_firewall":             NewEdgeFirewallResource,
 		"vcp_vmware_edge_nat":                  NewEdgeNATResource,
