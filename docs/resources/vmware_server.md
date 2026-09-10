@@ -7,9 +7,12 @@ description: |-
   cpu, ram_mb, system_disk_mb, network_bandwidth_mbps, name, computer_name, nested_hypervisor and volumes are changed in place. Everything else replaces the machine.
   ~> Changing image_id destroys the server and creates another one — with a new id, a new address and an empty disk. There is no way to reinstall a machine in place, so a plan that shows a replacement here is a plan that loses the data. location_id, system_disk_type, public_network_id, gpu, ssh_key_ids, backup_* and need_sysprep replace it for the same reason.
   ~> Resizing a running machine needs an image that supports it (cpu_hot_add / memory_hot_add in vcp_vmware_images). Without them, power the server off before applying.
+  Copying an existing machine
+  copy_from_server_id is the second way to bring a server into being: instead of ordering one from an image, the platform duplicates a machine that already exists, disks and all. The copy takes its whole specification from the source, so copy_from_server_id and name are the only arguments a copy accepts — declare anything else and the plan says so rather than letting the platform ignore it. Once the copy exists it is an ordinary server: add cpu, ram_mb, volumes and the rest to the same resource and the next apply changes them in place.
+  ~> Copying takes minutes, and copy_from_server_id records where the machine came from — the API never reports it. Like the other create-only arguments, changing or removing it replaces the machine, which is not what tidying up a configuration should do: keep it, or add lifecycle { ignore_changes = [copy_from_server_id] }.
   Importing
   terraform import vcp_vmware_server.<name> <id> reads everything the API reports. It cannot report the options that only exist at order time, so restate them in the configuration afterwards and check the first plan is empty:
-  ssh_key_ids, backup_enabled, backup_period, need_sysprep — write-only, never returned;public_network_id — the interface is reported, the network it was ordered from is not;computer_name — reported in the platform's upper-case spelling (SRV-3), which the provider compares case-insensitively;volumes — an imported server manages no disks until they are declared, each with a number of your choosing.
+  ssh_key_ids, backup_enabled, backup_period, need_sysprep — write-only, never returned;public_network_id — the interface is reported, the network it was ordered from is not;computer_name — reported in the platform's upper-case spelling (SRV-3), which the provider compares case-insensitively;volumes — an imported server manages no disks until they are declared, each with a number of your choosing;copy_from_server_id — a copy is indistinguishable from an ordered machine once it exists.
 ---
 
 # vcp_vmware_server (Resource)
@@ -22,6 +25,12 @@ Manages a VMware Cloud server.
 
 ~> Resizing a running machine needs an image that supports it (`cpu_hot_add` / `memory_hot_add` in `vcp_vmware_images`). Without them, power the server off before applying.
 
+### Copying an existing machine
+
+`copy_from_server_id` is the second way to bring a server into being: instead of ordering one from an image, the platform duplicates a machine that already exists, disks and all. The copy takes its whole specification from the source, so `copy_from_server_id` and `name` are the only arguments a copy accepts — declare anything else and the plan says so rather than letting the platform ignore it. Once the copy exists it is an ordinary server: add `cpu`, `ram_mb`, `volumes` and the rest to the same resource and the next apply changes them in place.
+
+~> Copying takes minutes, and `copy_from_server_id` records where the machine came from — the API never reports it. Like the other create-only arguments, changing or removing it **replaces the machine**, which is not what tidying up a configuration should do: keep it, or add `lifecycle { ignore_changes = [copy_from_server_id] }`.
+
 ### Importing
 
 `terraform import vcp_vmware_server.<name> <id>` reads everything the API reports. It cannot report the options that only exist at order time, so restate them in the configuration afterwards and check the first plan is empty:
@@ -29,7 +38,8 @@ Manages a VMware Cloud server.
 * `ssh_key_ids`, `backup_enabled`, `backup_period`, `need_sysprep` — write-only, never returned;
 * `public_network_id` — the interface is reported, the network it was ordered from is not;
 * `computer_name` — reported in the platform's upper-case spelling (SRV-3), which the provider compares case-insensitively;
-* `volumes` — an imported server manages no disks until they are declared, each with a `number` of your choosing.
+* `volumes` — an imported server manages no disks until they are declared, each with a `number` of your choosing;
+* `copy_from_server_id` — a copy is indistinguishable from an ordered machine once it exists.
 
 ## Example Usage
 
@@ -66,6 +76,17 @@ resource "vcp_vmware_server" "gpu" {
   }
 }
 
+# A copy of an existing machine, disks and all. The copy takes its whole
+# specification from the source, so copy_from_server_id and name are the only
+# arguments it accepts — anything else is refused at plan time.
+#
+# Once it exists it is an ordinary server: adding cpu, ram_mb or volumes here
+# changes them in place on the next apply.
+resource "vcp_vmware_server" "web_clone" {
+  copy_from_server_id = vcp_vmware_server.web.id
+  name                = "web-01-clone"
+}
+
 # Nested hypervisor: the guest is given hardware-assisted CPU virtualization
 # and can run a hypervisor of its own. The location has to offer a VDC that
 # supports it (nested_hypervisor_supported in vcp_vmware_locations), and gpu
@@ -89,12 +110,7 @@ resource "vcp_vmware_server" "lab" {
 
 ### Required
 
-- `cpu` (Number) Number of vCPUs.
-- `image_id` (Number) OS image/template ID. Changing this forces recreation.
-- `location_id` (Number) Location ID where the server is created. Changing this forces recreation.
 - `name` (String) Display name of the server.
-- `ram_mb` (Number) RAM in MB.
-- `system_disk_mb` (Number) System disk size in MB.
 
 ### Optional
 
@@ -103,7 +119,11 @@ resource "vcp_vmware_server" "lab" {
 - `computer_name` (String) Guest OS hostname. If omitted, the platform derives one.
 
 The backend normalises this value to **UPPERCASE** (review SRV-3); the provider treats `computer_name` case-insensitively, so writing it in any case does not cause a perpetual diff.
+- `copy_from_server_id` (Number) Create the server as a copy of an existing one instead of ordering it from an image. The copy takes its whole specification from the source, so name is the only other argument it accepts. Changing this forces recreation. Some platform installations refuse to copy a running machine and answer "The server is required to be powered off" — power the source off before the apply if yours does.
+- `cpu` (Number) Number of vCPUs. Required when ordering a server; a copy inherits the source's.
 - `gpu` (Attributes) GPU profile. Changing this forces recreation. (see [below for nested schema](#nestedatt--gpu))
+- `image_id` (Number) OS image/template ID. Required when ordering a server; a copy (copy_from_server_id) carries the image of its source. Changing this forces recreation.
+- `location_id` (Number) Location ID where the server is created. Required when ordering a server; a copy (copy_from_server_id) is created in the location of its source. Changing this forces recreation.
 - `need_sysprep` (Boolean) Run sysprep at creation. Changing this forces recreation.
 - `nested_hypervisor` (Boolean) Whether the guest operating system may run its own hypervisor — the **Nested hypervisor** setting, what the panel calls exposing hardware-assisted CPU virtualization to the guest OS. Off unless asked for, and editable in place.
 
@@ -114,7 +134,9 @@ The backend normalises this value to **UPPERCASE** (review SRV-3); the provider 
 
 Mutually exclusive with `public_network_id`: when a network is named, the interface takes the bandwidth of that network and a value here would be ignored.
 - `public_network_id` (Number) Public network to connect at creation. When set, the interface takes its bandwidth from the network and network_bandwidth_mbps must not be set. Changing this forces recreation.
+- `ram_mb` (Number) RAM in MB. Required when ordering a server; a copy inherits the source's.
 - `ssh_key_ids` (Set of Number) SSH key IDs to inject at creation. Changing this forces recreation.
+- `system_disk_mb` (Number) System disk size in MB. Required when ordering a server; a copy inherits the source's.
 - `system_disk_type` (String) System disk type. Changing this forces recreation.
 - `volumes` (Attributes List) Additional data disks attached to the server.
 

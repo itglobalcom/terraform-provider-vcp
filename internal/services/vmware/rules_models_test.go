@@ -15,7 +15,7 @@ func intPtr(i int) *int       { return &i }
 // A rule whose optional attributes are absent must reach the API as absent, not
 // as an empty string: the API stores "" as a literal value and the rule then
 // matches nothing.
-func TestExpandEdgeFirewallRulesOmitsUnsetAttributes(t *testing.T) {
+func TestExpandEdgeFirewallRulesSubstitutesAnyForUnsetAttributes(t *testing.T) {
 	out := expandEdgeFirewallRules([]edgeFirewallRuleModel{{
 		Name:            types.StringValue("ssh"),
 		Action:          types.StringValue(entities.VmwareEdgeFirewallActionAllow),
@@ -33,11 +33,13 @@ func TestExpandEdgeFirewallRulesOmitsUnsetAttributes(t *testing.T) {
 	if rule.Action != entities.VmwareEdgeFirewallActionAllow {
 		t.Errorf("action = %q, want %q", rule.Action, entities.VmwareEdgeFirewallActionAllow)
 	}
-	if rule.Source != nil {
-		t.Errorf("an unset source must be omitted, got %q", *rule.Source)
+	// The contract requires every address and port of a rule, so an unset one
+	// goes as "any"; omitting it fails the request outright.
+	if rule.Source == nil || *rule.Source != entities.VmwareEdgeFirewallAny {
+		t.Errorf("source = %v, want %q", rule.Source, entities.VmwareEdgeFirewallAny)
 	}
-	if rule.SourcePort != nil {
-		t.Errorf("an unknown source_port must be omitted, got %q", *rule.SourcePort)
+	if rule.SourcePort == nil || *rule.SourcePort != entities.VmwareEdgeFirewallAny {
+		t.Errorf("source_port = %v, want %q", rule.SourcePort, entities.VmwareEdgeFirewallAny)
 	}
 	if rule.Destination == nil || *rule.Destination != "10.0.0.10" {
 		t.Errorf("destination = %v, want 10.0.0.10", rule.Destination)
@@ -381,10 +383,54 @@ func TestServerFirewallRulesRoundTrip(t *testing.T) {
 	if rule.Source == nil || *rule.Source != "203.0.113.0/24" {
 		t.Errorf("source = %v, want 203.0.113.0/24", rule.Source)
 	}
-	if rule.SourcePort != nil {
-		t.Errorf("an absent source_port must stay absent, got %q", *rule.SourcePort)
+	// An absent port is sent as "any" — the contract has no way to say "unset".
+	if rule.SourcePort == nil || *rule.SourcePort != entities.VmwareEdgeFirewallAny {
+		t.Errorf("source_port = %v, want %q", rule.SourcePort, entities.VmwareEdgeFirewallAny)
 	}
 	if rule.DestinationPort == nil || *rule.DestinationPort != "22" {
 		t.Errorf("destination_port = %v, want 22", rule.DestinationPort)
 	}
+}
+
+// Every address and port of a firewall rule is required by the contract
+// (ServerFirewallRuleDto marks all four [EncodedRequired]), so an attribute the
+// configuration leaves out goes on the wire as "any". Omitting it fails the
+// request with "The firewall source is required" — which is what the schema's
+// "Defaults to any" was meant to prevent.
+func TestExpandFirewallRulesSendsAnyForUnsetAddressesAndPorts(t *testing.T) {
+	t.Run("edge", func(t *testing.T) {
+		out := expandEdgeFirewallRules([]edgeFirewallRuleModel{{
+			Action: types.StringValue("allow"),
+		}})
+
+		for name, got := range map[string]*string{
+			"source":           out[0].Source,
+			"source_port":      out[0].SourcePort,
+			"destination":      out[0].Destination,
+			"destination_port": out[0].DestinationPort,
+		} {
+			if got == nil {
+				t.Errorf("%s omitted; the API requires it", name)
+				continue
+			}
+			if *got != entities.VmwareEdgeFirewallAny {
+				t.Errorf("%s = %q, want %q", name, *got, entities.VmwareEdgeFirewallAny)
+			}
+		}
+	})
+
+	t.Run("server", func(t *testing.T) {
+		out := expandServerFirewallRules([]serverFirewallRuleModel{{
+			Name: types.StringValue("ssh"), Action: types.StringValue("allow"),
+			TrafficDirection: types.StringValue("incoming"), Protocol: types.StringValue("tcp"),
+			DestinationPort: types.StringValue("22"),
+		}})
+
+		if out[0].Source == nil || *out[0].Source != entities.VmwareEdgeFirewallAny {
+			t.Errorf("source = %v, want %q", out[0].Source, entities.VmwareEdgeFirewallAny)
+		}
+		if out[0].DestinationPort == nil || *out[0].DestinationPort != "22" {
+			t.Errorf("destination_port = %v, want the configured 22", out[0].DestinationPort)
+		}
+	})
 }

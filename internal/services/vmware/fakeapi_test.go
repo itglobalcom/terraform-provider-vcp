@@ -54,6 +54,10 @@ type fakeAPI struct {
 	// server firewall rule sets, by server id.
 	serverFirewalls map[int][]entities.VmwareServerFirewallRule
 
+	// the one snapshot a server may hold, by server id. Absent means the server
+	// has none, which the API reports as a 200 with no "snapshot" key at all.
+	snapshots map[int]*entities.VmwareSnapshot
+
 	// locations the catalog answers with, in the order they were added.
 	locations []*entities.VmwareLocation
 
@@ -86,6 +90,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		firewalls:       map[int]*entities.VmwareEdgeFirewall{},
 		natRules:        map[int][]entities.VmwareEdgeNATRule{},
 		serverFirewalls: map[int][]entities.VmwareServerFirewallRule{},
+		snapshots:       map[int]*entities.VmwareSnapshot{},
 		failNext:        map[string]int{},
 		failAfter:       map[string]int{},
 		nextID:          600,
@@ -208,11 +213,13 @@ var (
 	serverFWPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
 	taskPath         = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
 
-	locationsPath     = regexp.MustCompile(`^/api/v1/vmware/locations$`)
-	serversPath       = regexp.MustCompile(`^/api/v1/vmware/servers$`)
-	serverPath        = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
-	serverNamePath    = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
-	serverVolumesPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/volumes$`)
+	locationsPath      = regexp.MustCompile(`^/api/v1/vmware/locations$`)
+	serversPath        = regexp.MustCompile(`^/api/v1/vmware/servers$`)
+	serverPath         = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
+	serverNamePath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
+	serverVolumesPath  = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/volumes$`)
+	serverSnapshotPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/snapshot$`)
+	serverCopyPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/copy$`)
 	// The switch action is in the path; there is no request body.
 	serverNestedHypervisorPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/nested-hypervisor/(enable|disable)$`)
 )
@@ -262,6 +269,10 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleServerFirewall(w, r)
 	case serverNestedHypervisorPath.MatchString(r.URL.Path):
 		a.handleServerNestedHypervisor(w, r)
+	case serverSnapshotPath.MatchString(r.URL.Path):
+		a.handleServerSnapshot(w, r)
+	case serverCopyPath.MatchString(r.URL.Path):
+		a.handleServerCopy(w, r)
 	case serverNamePath.MatchString(r.URL.Path):
 		a.handleServerName(w, r)
 	case serverVolumesPath.MatchString(r.URL.Path):
@@ -520,6 +531,99 @@ func (a *fakeAPI) handleServers(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, entities.VmwareServerOrder{ServerID: id, TaskID: "vmw1006"})
 }
 
+// handleServerCopy duplicates a server the way the platform does: everything but
+// the name comes from the source, and the answer carries the new server's id
+// alongside the task — a copy is identifiable straight away, unlike a volume or
+// an interface.
+func (a *fakeAPI) handleServerCopy(w http.ResponseWriter, r *http.Request) {
+	sourceID, _ := strconv.Atoi(serverCopyPath.FindStringSubmatch(r.URL.Path)[1])
+
+	if r.Method != http.MethodPost {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	source, ok := a.servers[sourceID]
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+
+	var req entities.VmwareCopyServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "bad body")
+		return
+	}
+	if req.Name == "" {
+		a.fail(w, http.StatusBadRequest, -2002, "name is required")
+		return
+	}
+
+	a.nextID++
+	copied := *source
+	copied.ID = a.nextID
+	copied.Name = req.Name
+	a.servers[copied.ID] = &copied
+
+	a.writeJSON(w, entities.VmwareServerOrder{ServerID: copied.ID, TaskID: "vmw1008"})
+}
+
+// handleServerSnapshot serves the singleton snapshot of a server.
+//
+// The read is where the fake earns its keep: a server with no snapshot answers
+// 200 with the body `{}`, not `{"snapshot": null}` and not 404, because the
+// Public API drops null fields (NullValueHandling.Ignore). Reproducing the DTO's
+// shape instead of the wire's would make the "no snapshot" test prove nothing.
+func (a *fakeAPI) handleServerSnapshot(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverSnapshotPath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if _, ok := a.servers[id]; !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	snapshot := a.snapshots[id]
+
+	switch r.Method {
+	case http.MethodGet:
+		if snapshot == nil {
+			a.writeJSON(w, map[string]any{})
+			return
+		}
+		a.writeJSON(w, map[string]any{"snapshot": snapshot})
+
+	case http.MethodPost:
+		var req entities.VmwareCreateSnapshotRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			a.fail(w, http.StatusBadRequest, -2002, "bad body")
+			return
+		}
+		if snapshot != nil {
+			// OnlyOneSnapshotIsAllowed: the platform refuses the second one.
+			a.fail(w, http.StatusBadRequest, -12055, "only one snapshot is allowed")
+			return
+		}
+		a.snapshots[id] = &entities.VmwareSnapshot{Name: req.Name, Created: "2026-09-04T10:00:00Z"}
+		a.writeTask(w, "vmw1006")
+
+	case http.MethodDelete:
+		if snapshot == nil {
+			a.fail(w, http.StatusNotFound, -404, "snapshot not found")
+			return
+		}
+		a.snapshots[id] = nil
+		a.writeTask(w, "vmw1007")
+
+	default:
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+	}
+}
+
 // handleServerVolumes answers the volume list every server apply ends with; no
 // test here uses data disks.
 func (a *fakeAPI) handleServerVolumes(w http.ResponseWriter, r *http.Request) {
@@ -662,6 +766,50 @@ func planOf(t *testing.T, s rsschema.Schema, model any) tfsdk.Plan {
 		t.Fatalf("building the plan: %v", diags)
 	}
 	return plan
+}
+
+// planForCreate turns a model into the plan the framework hands a Create: a
+// Computed attribute the configuration leaves null is *unknown* there, not null,
+// until the apply settles it. planOf alone writes nulls, and a null is already
+// settled — a resource that never resolves an unknown would pass with it.
+//
+// Deriving the unknowns from the schema rather than listing them means a new
+// Optional+Computed attribute comes under the same check without anyone
+// remembering to add it.
+func planForCreate(t *testing.T, s rsschema.Schema, model any) tfsdk.Plan {
+	t.Helper()
+	plan := planOf(t, s, model)
+
+	attributes := map[string]tftypes.Value{}
+	if err := plan.Raw.As(&attributes); err != nil {
+		t.Fatalf("reading the plan back: %v", err)
+	}
+	for name, attribute := range s.Attributes {
+		if !attribute.IsComputed() || !attributes[name].IsNull() {
+			continue
+		}
+		attributes[name] = tftypes.NewValue(attributes[name].Type(), tftypes.UnknownValue)
+	}
+	plan.Raw = tftypes.NewValue(plan.Raw.Type(), attributes)
+	return plan
+}
+
+// assertNoUnknowns fails on any value the resource left unresolved. Terraform
+// refuses such a state with "Provider produced inconsistent result after apply",
+// which aborts the apply after the object has already been created — and without
+// a live stand this is the only place it shows up.
+func assertNoUnknowns(t *testing.T, state tfsdk.State) {
+	t.Helper()
+	err := tftypes.Walk(state.Raw, func(path *tftypes.AttributePath, value tftypes.Value) (bool, error) {
+		if !value.IsKnown() {
+			t.Errorf("%s is still unknown after the apply", path)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("walking the state: %v", err)
+	}
 }
 
 // configOf turns a model into a configuration, for ValidateConfig. A Config is

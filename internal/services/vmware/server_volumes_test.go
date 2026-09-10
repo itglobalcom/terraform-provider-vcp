@@ -318,6 +318,58 @@ func TestServerValidateConfig(t *testing.T) {
 	})
 }
 
+// A server whose configuration carries no `volumes` block leaves the attribute
+// null, and an update has to leave it null: answering with an empty list fails
+// the apply with "Provider produced inconsistent result after apply ... .volumes:
+// was null, but now ListValEmpty" — after the update has already been sent.
+func TestVmwareServerUpdateKeepsVolumesNullWhenNoneAreConfigured(t *testing.T) {
+	api := newFakeAPI(t)
+	addSpecServer(api, 5679, "web-clone")
+
+	res := &serverResource{}
+	configure(t, res, api.client(t))
+	s := resourceSchema(t, res)
+
+	prior := copyServerModel(5678, "web-clone")
+	prior.ID = types.Int64Value(5679)
+	prior.LocationID = types.Int64Value(7)
+	prior.ImageID = types.Int64Value(42)
+	prior.CPU = types.Int64Value(2)
+	prior.RamMB = types.Int64Value(4096)
+	prior.SystemDiskMB = types.Int64Value(51200)
+
+	plan := prior
+	plan.Name = types.StringValue("web-clone-renamed")
+
+	resp := resource.UpdateResponse{State: stateOf(t, s, prior)}
+	res.Update(context.Background(), resource.UpdateRequest{
+		Plan:  planOf(t, s, plan),
+		State: stateOf(t, s, prior),
+	}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Update failed: %v", resp.Diagnostics)
+	}
+
+	var volumes types.List
+	resp.Diagnostics.Append(resp.State.GetAttribute(context.Background(), path.Root("volumes"), &volumes)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("reading volumes back: %v", resp.Diagnostics)
+	}
+	if !volumes.IsNull() {
+		t.Errorf("volumes = %v, want null: the configuration declares no disks", volumes)
+	}
+}
+
+// The same invariant one level down, where it is decided.
+func TestSyncServerVolumesKeepsTheNullness(t *testing.T) {
+	if got := syncServerVolumes(context.Background(), nil, 1, nil, nil, &diag.Diagnostics{}); got != nil {
+		t.Errorf("nothing planned gave %#v, want nil: an empty slice becomes an empty list", got)
+	}
+	if got := syncServerVolumes(context.Background(), nil, 1, nil, []serverVolumeModel{}, &diag.Diagnostics{}); got == nil {
+		t.Error("an empty plan gave nil; `volumes = []` is an empty list, not null")
+	}
+}
+
 // gpuObject is the `gpu` attribute a configuration would carry — the whole triple,
 // which is the only shape the API accepts.
 func gpuObject(t *testing.T, modelID, vramMB, cardCount int64) types.Object {

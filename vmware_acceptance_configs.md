@@ -40,6 +40,11 @@ VMWARE_CONFIG_DUMP=$PWD/vmware_acceptance_configs.md go test ./internal/services
 - [`volumes/one`](#volumesone) — TestAccVmwareServerVolumes_lifecycle — one data disk beside the boot disk.
 - [`volumes/grown`](#volumesgrown) — TestAccVmwareServerVolumes_lifecycle — the same disk renamed and grown by one step of its type.
 - [`volumes/two`](#volumestwo) — TestAccVmwareServerVolumes_lifecycle — a second disk alongside the first.
+- [`copy/basic`](#copybasic) — TestAccVmwareServerCopy_lifecycle — a machine and a copy of it, which states only where it comes from and what it is called.
+- [`copy/resized`](#copyresized) — TestAccVmwareServerCopy_lifecycle — the same copy resized in place, which is what a copy is once it exists.
+- [`copy/withImage`](#copywithimage) — TestAccVmwareServerCopy_refusesOrderArguments — a copy and an image at once, refused at plan time.
+- [`snapshot/one`](#snapshotone) — TestAccVmwareServerSnapshot_lifecycle, _disappears — the single snapshot a VMware server can hold.
+- [`snapshot/two`](#snapshottwo) — TestAccVmwareServerSnapshot_secondIsRefused — a second snapshot of one machine, which the platform allows no server to hold.
 - [`nic/attachmentBase`](#nicattachmentbase) — TestAccVmwareServerNetworkAttachment_basic (last step) — server and network with no attachment between them.
 - [`nic/attachmentStatic`](#nicattachmentstatic) — TestAccVmwareServerNetworkAttachment_basic, _ipForcesReplacement, _disappears.
 - [`nic/attachmentNoIP`](#nicattachmentnoip) — The same attachment with the address left to the platform.
@@ -601,6 +606,193 @@ resource "vcp_vmware_server" "test" {
 }
 ```
 
+## copy/basic
+
+TestAccVmwareServerCopy_lifecycle — a machine and a copy of it, which states only where it comes from and what it is called.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id      = 5
+  name             = "test-acc-vmw-syntax"
+  image_id         = 42
+  cpu              = 1
+  ram_mb           = local.ram_mb
+  system_disk_mb   = local.system_disk_mb
+  system_disk_type = local.disk_type.title
+}
+
+resource "vcp_vmware_server" "copy" {
+  copy_from_server_id = vcp_vmware_server.test.id
+  name                = "test-acc-vmw-syntax-copy"
+}
+```
+
+## copy/resized
+
+TestAccVmwareServerCopy_lifecycle — the same copy resized in place, which is what a copy is once it exists.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id      = 5
+  name             = "test-acc-vmw-syntax"
+  image_id         = 42
+  cpu              = 1
+  ram_mb           = local.ram_mb
+  system_disk_mb   = local.system_disk_mb
+  system_disk_type = local.disk_type.title
+}
+
+resource "vcp_vmware_server" "copy" {
+  copy_from_server_id = vcp_vmware_server.test.id
+  name                = "test-acc-vmw-syntax-copy"
+  ram_mb              = local.ram_mb + 1024
+}
+```
+
+## copy/withImage
+
+TestAccVmwareServerCopy_refusesOrderArguments — a copy and an image at once, refused at plan time.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id      = 5
+  name             = "test-acc-vmw-syntax"
+  image_id         = 42
+  cpu              = 1
+  ram_mb           = local.ram_mb
+  system_disk_mb   = local.system_disk_mb
+  system_disk_type = local.disk_type.title
+}
+
+resource "vcp_vmware_server" "copy" {
+  copy_from_server_id = vcp_vmware_server.test.id
+  name                = "test-acc-vmw-syntax-copy"
+  image_id            = 42
+}
+```
+
+## snapshot/one
+
+TestAccVmwareServerSnapshot_lifecycle, _disappears — the single snapshot a VMware server can hold.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id      = 5
+  name             = "test-acc-vmw-syntax"
+  image_id         = 42
+  cpu              = 1
+  ram_mb           = local.ram_mb
+  system_disk_mb   = local.system_disk_mb
+  system_disk_type = local.disk_type.title
+}
+
+resource "vcp_vmware_server_snapshot" "test" {
+  server_id = vcp_vmware_server.test.id
+  name      = "before-upgrade"
+}
+```
+
+## snapshot/two
+
+TestAccVmwareServerSnapshot_secondIsRefused — a second snapshot of one machine, which the platform allows no server to hold.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id      = 5
+  name             = "test-acc-vmw-syntax"
+  image_id         = 42
+  cpu              = 1
+  ram_mb           = local.ram_mb
+  system_disk_mb   = local.system_disk_mb
+  system_disk_type = local.disk_type.title
+}
+
+resource "vcp_vmware_server_snapshot" "test" {
+  server_id = vcp_vmware_server.test.id
+  name      = "first"
+}
+
+resource "vcp_vmware_server_snapshot" "second" {
+  server_id = vcp_vmware_server.test.id
+  name      = "second"
+}
+```
+
 ## nic/attachmentBase
 
 TestAccVmwareServerNetworkAttachment_basic (last step) — server and network with no attachment between them.
@@ -904,7 +1096,7 @@ resource "vcp_vmware_edge_firewall" "test" {
       action           = "allow"
       protocol         = "tcp"
       source           = "203.0.113.0/24"
-      source_port      = "1024-65535"
+      source_port      = "any"
       destination      = "10.233.1.0/24"
       destination_port = "22"
     },

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -16,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -30,6 +32,7 @@ var (
 	_ resource.ResourceWithConfigure      = &serverResource{}
 	_ resource.ResourceWithImportState    = &serverResource{}
 	_ resource.ResourceWithValidateConfig = &serverResource{}
+	_ resource.ResourceWithModifyPlan     = &serverResource{}
 )
 
 func NewServerResource() resource.Resource { return &serverResource{} }
@@ -55,6 +58,17 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"reason.\n\n" +
 			"~> Resizing a running machine needs an image that supports it (`cpu_hot_add` / `memory_hot_add` in " +
 			"`vcp_vmware_images`). Without them, power the server off before applying.\n\n" +
+			"### Copying an existing machine\n\n" +
+			"`copy_from_server_id` is the second way to bring a server into being: instead of ordering one from " +
+			"an image, the platform duplicates a machine that already exists, disks and all. The copy takes its " +
+			"whole specification from the source, so `copy_from_server_id` and `name` are the only arguments a " +
+			"copy accepts — declare anything else and the plan says so rather than letting the platform ignore " +
+			"it. Once the copy exists it is an ordinary server: add `cpu`, `ram_mb`, `volumes` and the rest to the " +
+			"same resource and the next apply changes them in place.\n\n" +
+			"~> Copying takes minutes, and `copy_from_server_id` records where the machine came from — the API " +
+			"never reports it. Like the other create-only arguments, changing or removing it **replaces the " +
+			"machine**, which is not what tidying up a configuration should do: keep it, or add " +
+			"`lifecycle { ignore_changes = [copy_from_server_id] }`.\n\n" +
 			"### Importing\n\n" +
 			"`terraform import vcp_vmware_server.<name> <id>` reads everything the API reports. It cannot report " +
 			"the options that only exist at order time, so restate them in the configuration afterwards and check " +
@@ -64,7 +78,8 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"* `computer_name` — reported in the platform's upper-case spelling (SRV-3), which the provider " +
 			"compares case-insensitively;\n" +
 			"* `volumes` — an imported server manages no disks until they are declared, each with a `number` of " +
-			"your choosing.",
+			"your choosing;\n" +
+			"* `copy_from_server_id` — a copy is indistinguishable from an ordered machine once it exists.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed:      true,
@@ -72,13 +87,36 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 			"location_id": schema.Int64Attribute{
-				Required:      true,
-				Description:   "Location ID where the server is created. Changing this forces recreation.",
-				PlanModifiers: requiresReplaceInt,
+				Optional: true,
+				Computed: true,
+				Description: "Location ID where the server is created. Required when ordering a server; a copy " +
+					"(copy_from_server_id) is created in the location of its source. Changing this forces recreation.",
+				PlanModifiers: append([]planmodifier.Int64{int64planmodifier.UseStateForUnknown()}, requiresReplaceInt...),
 			},
 			"name": schema.StringAttribute{
 				Required:    true,
 				Description: "Display name of the server.",
+			},
+			// The second way a server comes into being. It is write-only: no read
+			// reports that a machine is a copy, so it is RequiresReplace like the
+			// other create-only inputs — and its whole point is that a copy takes
+			// its specification from the source, which is why the plan refuses the
+			// order-time arguments beside it (checked in ModifyPlan, where the
+			// create can be told from an update).
+			//
+			// client_network_id, the copy request's other field, is deliberately not
+			// exposed: an interface on a client network is already
+			// vcp_vmware_server_network_attachment, which reads back, imports and
+			// shows drift, and a create-only duplicate of it would do none of those.
+			"copy_from_server_id": schema.Int64Attribute{
+				Optional: true,
+				Description: "Create the server as a copy of an existing one instead of ordering it from an " +
+					"image. The copy takes its whole specification from the source, so name is the only other " +
+					"argument it accepts. Changing this forces recreation. Some platform installations refuse " +
+					"to copy a running machine and answer \"The server is required to be powered off\" — " +
+					"power the source off before the apply if yours does.",
+				PlanModifiers: requiresReplaceInt,
+				Validators:    []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"computer_name": schema.StringAttribute{
 				Optional: true,
@@ -96,13 +134,32 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"image_id": schema.Int64Attribute{
-				Required:      true,
-				Description:   "OS image/template ID. Changing this forces recreation.",
-				PlanModifiers: requiresReplaceInt,
+				Optional: true,
+				Computed: true,
+				Description: "OS image/template ID. Required when ordering a server; a copy " +
+					"(copy_from_server_id) carries the image of its source. Changing this forces recreation.",
+				PlanModifiers: append([]planmodifier.Int64{int64planmodifier.UseStateForUnknown()}, requiresReplaceInt...),
 			},
-			"cpu":            schema.Int64Attribute{Required: true, Description: "Number of vCPUs."},
-			"ram_mb":         schema.Int64Attribute{Required: true, Description: "RAM in MB."},
-			"system_disk_mb": schema.Int64Attribute{Required: true, Description: "System disk size in MB."},
+			// cpu, ram_mb and system_disk_mb are Optional + Computed rather than
+			// Required because a copy is created from its source's specification and
+			// states none of them. Leaving one out when ordering a server is still
+			// refused — by ValidateConfig, which knows which of the two the
+			// configuration describes.
+			"cpu": schema.Int64Attribute{
+				Optional: true, Computed: true,
+				Description:   "Number of vCPUs. Required when ordering a server; a copy inherits the source's.",
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"ram_mb": schema.Int64Attribute{
+				Optional: true, Computed: true,
+				Description:   "RAM in MB. Required when ordering a server; a copy inherits the source's.",
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"system_disk_mb": schema.Int64Attribute{
+				Optional: true, Computed: true,
+				Description:   "System disk size in MB. Required when ordering a server; a copy inherits the source's.",
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
 			"system_disk_type": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -153,10 +210,18 @@ func (r *serverResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description:   "Run sysprep at creation. Changing this forces recreation.",
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
 			},
+			// Computed as well as Optional: the API reports the profile back, and a
+			// copy of a GPU-equipped machine carries one the configuration never
+			// asked for — without Computed that read would be an inconsistent
+			// result after apply.
 			"gpu": schema.SingleNestedAttribute{
-				Optional:      true,
-				Description:   "GPU profile. Changing this forces recreation.",
-				PlanModifiers: []planmodifier.Object{objectplanmodifier.RequiresReplace()},
+				Optional:    true,
+				Computed:    true,
+				Description: "GPU profile. Changing this forces recreation.",
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+					objectplanmodifier.RequiresReplace(),
+				},
 				// When a gpu block is present the backend selects the slicing policy by
 				// the exact (model_id, vram_mb, card_count) triple, so all three are
 				// required — the platform does not derive vram_mb/card_count (SDK S4).
@@ -222,9 +287,10 @@ func (r *serverResource) Configure(_ context.Context, req resource.ConfigureRequ
 }
 
 // ValidateConfig reports what the configuration can be judged on by itself:
-// attributes that describe the same interface in two ways, a machine asking for
-// two mutually exclusive platform features, and a set of disks that cannot be
-// told apart.
+// attributes that describe the same interface in two ways, the order-time
+// arguments a server cannot be ordered without, a machine asking for two
+// mutually exclusive platform features, and a set of disks that cannot be told
+// apart.
 func (r *serverResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config serverModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -235,13 +301,37 @@ func (r *serverResource) ValidateConfig(ctx context.Context, req resource.Valida
 	// The primary interface takes its bandwidth from the network it is put on, so
 	// a value alongside public_network_id would be accepted and then ignored — the
 	// state would say one thing and the platform another.
-	networkSet := !config.PublicNetworkID.IsNull() && !config.PublicNetworkID.IsUnknown()
-	bandwidthSet := !config.NetworkBandwidthMbps.IsNull() && !config.NetworkBandwidthMbps.IsUnknown()
+	networkSet := isSetInt(config.PublicNetworkID)
+	bandwidthSet := isSetInt(config.NetworkBandwidthMbps)
 	if networkSet && bandwidthSet {
 		resp.Diagnostics.AddAttributeError(path.Root("network_bandwidth_mbps"), "Conflicting Attributes",
 			"public_network_id and network_bandwidth_mbps describe the same interface in two ways. A server put "+
 				"on a named public network takes that network's bandwidth, and the value here would be ignored. "+
 				"Set one or the other.")
+	}
+
+	// location_id, image_id, cpu, ram_mb and system_disk_mb are Optional so that a
+	// copy can leave them to its source; a server that is *ordered* still cannot
+	// do without them. Reporting it here keeps the guarantee Required used to
+	// give, without Required's blindness to the two ways a server is created.
+	if !isDeclared(config.CopyFromServerID) {
+		for _, arg := range []struct {
+			name     string
+			declared bool
+		}{
+			{"location_id", isDeclared(config.LocationID)},
+			{"image_id", isDeclared(config.ImageID)},
+			{"cpu", isDeclared(config.CPU)},
+			{"ram_mb", isDeclared(config.RamMB)},
+			{"system_disk_mb", isDeclared(config.SystemDiskMB)},
+		} {
+			if arg.declared {
+				continue
+			}
+			resp.Diagnostics.AddAttributeError(path.Root(arg.name), "Missing Attribute",
+				fmt.Sprintf("%s is needed to order a server. Set it, or set copy_from_server_id to create this "+
+					"machine as a copy of an existing one, which takes its specification from the source.", arg.name))
+		}
 	}
 
 	// GPU and nested virtualization are mutually exclusive on the platform;
@@ -259,6 +349,58 @@ func (r *serverResource) ValidateConfig(ctx context.Context, req resource.Valida
 	validateServerVolumes(config.Volumes, &resp.Diagnostics)
 }
 
+// ModifyPlan refuses, at plan time, an order-time argument beside
+// copy_from_server_id — but only while the machine is being created.
+//
+// The copy request carries a name and nothing else, so anything else in the
+// configuration would be accepted and then silently ignored. The check cannot
+// live in ValidateConfig, which never sees prior state: copy_from_server_id
+// stays in the configuration for the life of the machine (removing it would
+// replace it), and a copy has to remain resizable like any other server.
+func (r *serverResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Null plan = destroy; non-null state = the machine already exists.
+	if req.Plan.Raw.IsNull() || !req.State.Raw.IsNull() {
+		return
+	}
+
+	var config serverModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() || !isDeclared(config.CopyFromServerID) {
+		return
+	}
+
+	for _, arg := range []struct {
+		name     string
+		declared bool
+	}{
+		{"location_id", isDeclared(config.LocationID)},
+		{"image_id", isDeclared(config.ImageID)},
+		{"cpu", isDeclared(config.CPU)},
+		{"ram_mb", isDeclared(config.RamMB)},
+		{"system_disk_mb", isDeclared(config.SystemDiskMB)},
+		{"system_disk_type", isDeclared(config.SystemDiskType)},
+		{"public_network_id", isDeclared(config.PublicNetworkID)},
+		{"network_bandwidth_mbps", isDeclared(config.NetworkBandwidthMbps)},
+		{"computer_name", isDeclared(config.ComputerName)},
+		{"backup_enabled", isDeclared(config.BackupEnabled)},
+		{"backup_period", isDeclared(config.BackupPeriod)},
+		{"need_sysprep", isDeclared(config.NeedSysprep)},
+		{"ssh_key_ids", isDeclared(config.SSHKeyIDs)},
+		{"gpu", isDeclared(config.Gpu)},
+		{"volumes", len(config.Volumes) > 0},
+	} {
+		if !arg.declared {
+			continue
+		}
+		resp.Diagnostics.AddAttributeError(path.Root(arg.name), "Argument Not Accepted By A Copy",
+			fmt.Sprintf("A copy takes its whole specification from the server it is copied from, so the platform "+
+				"has no way to apply %s while creating it — copy_from_server_id and name are the only arguments "+
+				"a copy accepts.\n\nRemove %s to create the copy. Once it exists it is an ordinary server: add "+
+				"%s back and the next apply changes it in place, or replaces the machine where that argument "+
+				"requires it.", arg.name, arg.name, arg.name))
+	}
+}
+
 func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan serverModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -266,6 +408,68 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// Two ways a server comes into being: ordered from an image, or copied from a
+	// machine that already exists. Which one the configuration describes is
+	// settled at plan time (ValidateConfig, ModifyPlan), so here it is one branch.
+	var (
+		server *entities.VmwareServer
+		ok     bool
+	)
+	if isDeclared(plan.CopyFromServerID) {
+		server, ok = r.copyServer(ctx, &plan, &resp.Diagnostics)
+	} else {
+		server, ok = r.orderServer(ctx, &plan, &resp.Diagnostics)
+	}
+	if !ok {
+		return
+	}
+
+	state := plan // preserve write-only create inputs, copy_from_server_id included
+	mapServerComputed(&state, server)
+
+	// The data disks come after the machine: the order takes only the boot disk.
+	if len(plan.Volumes) > 0 {
+		defer locks.VmwareServer(server.ID)()
+		state.Volumes = syncServerVolumes(ctx, r.client, server.ID, nil, plan.Volumes, &resp.Diagnostics)
+		warnUntrackedVolumes(ctx, r.client, server.ID, state.Volumes, &resp.Diagnostics)
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// copyServer duplicates an existing machine. The copy request carries a name and
+// nothing else — the rest of the specification is the source's — and copying
+// takes minutes.
+//
+// The source is locked, not the copy: the platform serializes changes per object,
+// and the copy is read out of a source that must not be changing while it is.
+func (r *serverResource) copyServer(ctx context.Context, plan *serverModel,
+	diags *diag.Diagnostics) (*entities.VmwareServer, bool) {
+	sourceID := int(plan.CopyFromServerID.ValueInt64())
+	defer locks.VmwareServer(sourceID)()
+
+	tflog.Info(ctx, "Copying VMware server", map[string]any{
+		"source_server_id": sourceID, "name": plan.Name.ValueString(),
+	})
+
+	server, err := r.client.CopyVmwareServerAndWait(ctx, sourceID, &entities.VmwareCopyServerRequest{
+		Name: plan.Name.ValueString(),
+	})
+	if err != nil {
+		diags.AddError("Error Copying VMware Server",
+			fmt.Sprintf("Could not copy server %d to %q: %s\n\n"+
+				"If the message says the copy was created, the machine exists on the platform without being "+
+				"recorded here — find it in the panel and either delete it or import it.",
+				sourceID, plan.Name.ValueString(), err.Error()))
+		return nil, false
+	}
+	return server, true
+}
+
+// orderServer creates a server from an image, which is what every argument of
+// the resource beyond name and copy_from_server_id describes.
+func (r *serverResource) orderServer(ctx context.Context, plan *serverModel,
+	diags *diag.Diagnostics) (*entities.VmwareServer, bool) {
 	createReq := &entities.VmwareCreateServerRequest{
 		LocationID:       int(plan.LocationID.ValueInt64()),
 		Name:             plan.Name.ValueString(),
@@ -291,50 +495,39 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 	// Unknown means "not asked for"; the platform then orders with it off.
 	createReq.NestedHypervisor = optionalBool(plan.NestedHypervisor)
 
-	sshKeys, diags := int64SetToInts(ctx, plan.SSHKeyIDs)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	sshKeys, keyDiags := int64SetToInts(ctx, plan.SSHKeyIDs)
+	diags.Append(keyDiags...)
+	if diags.HasError() {
+		return nil, false
 	}
 	createReq.SSHKeys = sshKeys
 
-	gpu, diags := buildGpuRequest(ctx, plan.Gpu)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	gpu, gpuDiags := buildGpuRequest(ctx, plan.Gpu)
+	diags.Append(gpuDiags...)
+	if diags.HasError() {
+		return nil, false
 	}
 	createReq.GPU = gpu
 
 	tflog.Info(ctx, "Creating VMware server", map[string]any{"name": createReq.Name})
 	order, err := r.client.CreateVmwareServer(ctx, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Error Creating VMware Server", err.Error()+nestedHypervisorFailureHint(err))
-		return
+		diags.AddError("Error Creating VMware Server", err.Error()+nestedHypervisorFailureHint(err))
+		return nil, false
 	}
 	if order.TaskID != "" {
 		if _, err := r.client.WaitVmwareTask(ctx, order.TaskID); err != nil {
-			resp.Diagnostics.AddError("Error Awaiting VMware Server Creation", err.Error())
-			return
+			diags.AddError("Error Awaiting VMware Server Creation", err.Error())
+			return nil, false
 		}
 	}
 
 	server, err := r.client.GetVmwareServer(ctx, order.ServerID)
 	if err != nil {
-		resp.Diagnostics.AddError("Error Reading Created VMware Server", err.Error())
-		return
+		diags.AddError("Error Reading Created VMware Server", err.Error())
+		return nil, false
 	}
-
-	state := plan // preserve write-only create inputs
-	mapServerComputed(&state, server)
-
-	// The data disks come after the machine: the order takes only the boot disk.
-	if len(plan.Volumes) > 0 {
-		defer locks.VmwareServer(server.ID)()
-		state.Volumes = syncServerVolumes(ctx, r.client, server.ID, nil, plan.Volumes, &resp.Diagnostics)
-		warnUntrackedVolumes(ctx, r.client, server.ID, state.Volumes, &resp.Diagnostics)
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	return server, true
 }
 
 func (r *serverResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

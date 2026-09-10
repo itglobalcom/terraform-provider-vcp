@@ -378,14 +378,15 @@ func TestEdgeFirewallCreateAndDelete(t *testing.T) {
 		t.Error("the firewall must be on after the resource is created")
 	}
 
-	// Destroying it switches the firewall off and clears the rules.
+	// Destroying it clears the rules and leaves the firewall on: an NSX-T edge
+	// refuses to be switched off, and a filtering edge is the safer resting state.
 	deleteResp := resource.DeleteResponse{State: stateOf(t, s, state)}
 	res.Delete(context.Background(), resource.DeleteRequest{State: stateOf(t, s, state)}, &deleteResp)
 	if deleteResp.Diagnostics.HasError() {
 		t.Fatalf("Delete failed: %v", deleteResp.Diagnostics)
 	}
-	if api.firewalls[2479].Enabled == nil || *api.firewalls[2479].Enabled {
-		t.Error("the firewall must be off after the resource is destroyed")
+	if api.firewalls[2479].Enabled == nil || !*api.firewalls[2479].Enabled {
+		t.Error("the firewall must stay on after the resource is destroyed")
 	}
 	if len(api.firewalls[2479].Rules) != 0 {
 		t.Errorf("the edge still holds %d rules after the resource was destroyed", len(api.firewalls[2479].Rules))
@@ -467,10 +468,11 @@ func TestServerFirewallCreateReadDelete(t *testing.T) {
 	if len(state.Rules) != 1 {
 		t.Fatalf("state holds %d rules, want 1", len(state.Rules))
 	}
-	// An attribute the rule left out must stay absent rather than turn into an
-	// empty string, which the API would store as a literal value.
-	if !state.Rules[0].SourcePort.IsNull() {
-		t.Errorf("source_port = %q, want null", state.Rules[0].SourcePort.ValueString())
+	// The contract requires every address and port of a rule, so an attribute the
+	// configuration left out is sent — and stored — as "any". The attribute is
+	// Optional+Computed exactly so the platform's value can land in state.
+	if got := state.Rules[0].SourcePort.ValueString(); got != entities.VmwareEdgeFirewallAny {
+		t.Errorf("source_port = %q, want %q", got, entities.VmwareEdgeFirewallAny)
 	}
 	if got := api.serverFirewalls[5678]; len(got) != 1 || got[0].Name != "ssh-office" {
 		t.Errorf("the server holds %+v, want the one configured rule", got)

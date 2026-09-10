@@ -92,7 +92,7 @@ Optional:
 - `destination` (String) Destination, in the same forms as `source`. For traffic published with a DNAT rule this is already the *private* address of the server. Defaults to `any`.
 - `destination_port` (String) Destination port, in the same forms as `source_port`. Defaults to `any`.
 - `source` (String) Source: `any`, an address (`10.0.0.5`), a network (`10.0.0.0/24`) or a range (`10.0.0.5-10.0.0.9`). Defaults to `any`.
-- `source_port` (String) Source port: `any`, a port (`443`), a range (`1000-2000`) or a comma-separated list. Defaults to `any`.
+- `source_port` (String) Source port: `any`, a port (`443`), a range (`1000-2000`) or a comma-separated list. Defaults to `any`. An edge backed by NSX-T accepts only `any` here, whatever the protocol; one backed by NSX-V accepts a value for every protocol except `icmp` and `any`.
 
 ## Import
 

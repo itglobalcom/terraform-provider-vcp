@@ -51,13 +51,13 @@ func TestAccVmwareEdgeFirewall_basic(t *testing.T) {
 					// A port range has to survive the round trip as written — the API
 					// takes ports as strings precisely so it can carry one.
 					statecheck.ExpectKnownValue(resourceName,
-						tfjsonpath.New("rules").AtSliceIndex(2).AtMapKey("source_port"), knownvalue.StringExact("1024-65535")),
+						tfjsonpath.New("rules").AtSliceIndex(2).AtMapKey("source_port"), knownvalue.StringExact("any")),
 					// What happens to the attributes rule 1 leaves out — whether the
 					// platform echoes "any" or nothing — is not asserted here: either
 					// is fine, and the PlanOnly step below is what proves the answer
 					// does not turn into a permanent difference.
 				},
-				Check: checkEdgeFirewallRuleCount(&networkID, 3),
+				Check: checkEdgeFirewallRuleCount("vcp_vmware_network.test", 3),
 			},
 			{Config: initial, PlanOnly: true},
 			{
@@ -81,7 +81,7 @@ func TestAccVmwareEdgeFirewall_basic(t *testing.T) {
 					statecheck.ExpectKnownValue(resourceName, tfjsonpath.New("default_action"),
 						knownvalue.StringExact("allow")),
 				},
-				Check: checkEdgeFirewallRuleCount(&networkID, 1),
+				Check: checkEdgeFirewallRuleCount("vcp_vmware_network.test", 1),
 			},
 			// An empty list is a legitimate configuration: the firewall stays on
 			// and default_action becomes its whole behaviour.
@@ -92,15 +92,19 @@ func TestAccVmwareEdgeFirewall_basic(t *testing.T) {
 					statecheck.ExpectKnownValue(resourceName, tfjsonpath.New("rules"), knownvalue.ListSizeExact(0)),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					checkEdgeFirewallRuleCount(&networkID, 0),
-					checkEdgeFirewallEnabled(&networkID, true),
+					checkEdgeFirewallRuleCount("vcp_vmware_network.test", 0),
+					checkEdgeFirewallEnabled("vcp_vmware_network.test", true),
 				),
 			},
-			// The resource goes, the network stays: the firewall is switched off.
+			// The resource goes, the network stays: the rules are cleared and the
+			// firewall stays on — an edge backed by NSX-T cannot be switched off.
 			{
 				PreConfig: waitForBackend,
 				Config:    routedNetworkConfig(t, name, "10.233.1.0"),
-				Check:     checkEdgeFirewallEnabled(&networkID, false),
+				Check: resource.ComposeTestCheckFunc(
+					checkEdgeFirewallRuleCount("vcp_vmware_network.test", 0),
+					checkEdgeFirewallEnabled("vcp_vmware_network.test", true),
+				),
 			},
 		},
 	})
@@ -138,7 +142,7 @@ func TestAccVmwareEdgeFirewall_drift(t *testing.T) {
 			// Applying restores exactly the configured set.
 			{
 				Config: config,
-				Check:  checkEdgeFirewallRuleCount(&networkID, 1),
+				Check:  checkEdgeFirewallRuleCount("vcp_vmware_network.test", 1),
 			},
 			// A rule added elsewhere → the plan has to remove it.
 			{
@@ -192,7 +196,7 @@ func TestAccVmwareEdgeFirewall_adoptsExistingRules(t *testing.T) {
 					statecheck.ExpectKnownValue("vcp_vmware_edge_firewall.test",
 						tfjsonpath.New("rules"), knownvalue.ListSizeExact(1)),
 				},
-				Check: checkEdgeFirewallRuleCount(&networkID, 1),
+				Check: checkEdgeFirewallRuleCount("vcp_vmware_network.test", 1),
 			},
 		},
 	})
@@ -543,7 +547,7 @@ func TestAccVmwareEdgeRules_parallel(t *testing.T) {
 						tfjsonpath.New("rules"), knownvalue.ListSizeExact(1)),
 				},
 				Check: resource.ComposeTestCheckFunc(
-					checkEdgeFirewallRuleCount(&networkID, 2),
+					checkEdgeFirewallRuleCount("vcp_vmware_network.test", 2),
 					checkNATRuleCount(&networkID, 1),
 				),
 			},
@@ -703,6 +707,11 @@ func strPtr(s string) *string { return &s }
 // testAccEdgeFirewallRulesAllFields exercises every attribute a rule has, so the
 // read path is proved against a rule that carries all of them rather than the
 // minimum.
+//
+// source_port stays "any" everywhere on purpose: an edge backed by NSX-T rejects
+// any other value on every rule (FirewallRuleSourcePortMustBeAnyForNsxt), and the
+// suite has to pass on both kinds of stand. The attribute is still exercised —
+// it is sent, read back and compared.
 const testAccEdgeFirewallRulesAllFields = `
     {
       name             = "allow-https"
@@ -723,7 +732,7 @@ const testAccEdgeFirewallRulesAllFields = `
       action           = "allow"
       protocol         = "tcp"
       source           = "203.0.113.0/24"
-      source_port      = "1024-65535"
+      source_port      = "any"
       destination      = "10.233.1.0/24"
       destination_port = "22"
     },`

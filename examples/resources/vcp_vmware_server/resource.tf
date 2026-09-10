@@ -30,6 +30,17 @@ resource "vcp_vmware_server" "gpu" {
   }
 }
 
+# A copy of an existing machine, disks and all. The copy takes its whole
+# specification from the source, so copy_from_server_id and name are the only
+# arguments it accepts — anything else is refused at plan time.
+#
+# Once it exists it is an ordinary server: adding cpu, ram_mb or volumes here
+# changes them in place on the next apply.
+resource "vcp_vmware_server" "web_clone" {
+  copy_from_server_id = vcp_vmware_server.web.id
+  name                = "web-01-clone"
+}
+
 # Nested hypervisor: the guest is given hardware-assisted CPU virtualization
 # and can run a hypervisor of its own. The location has to offer a VDC that
 # supports it (nested_hypervisor_supported in vcp_vmware_locations), and gpu
