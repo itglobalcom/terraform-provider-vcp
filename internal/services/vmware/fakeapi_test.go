@@ -54,7 +54,14 @@ type fakeAPI struct {
 	// server firewall rule sets, by server id.
 	serverFirewalls map[int][]entities.VmwareServerFirewallRule
 
+	// locations the catalog answers with, in the order they were added.
+	locations []*entities.VmwareLocation
+
 	nextID int
+
+	// serverOrders records the create requests the provider sent, decoded, so
+	// "not asked for" and "asked for and false" stay distinguishable.
+	serverOrders []entities.VmwareCreateServerRequest
 
 	// requests records every call, so a test can assert what the provider did
 	// rather than only what it ended up with.
@@ -128,11 +135,38 @@ func (a *fakeAPI) addIsolatedNetwork(id int, name string) {
 	}
 }
 
+// addLocation registers a location in the catalog.
+func (a *fakeAPI) addLocation(id int, techTitle string, gpu, nestedHypervisor bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.locations = append(a.locations, &entities.VmwareLocation{
+		ID: id, TechTitle: techTitle, GPUSupported: gpu, NestedHypervisorSupported: nestedHypervisor,
+	})
+}
+
 func (a *fakeAPI) addServer(id int, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.servers[id] = &entities.VmwareServer{ID: id, Name: name, State: entities.VmwareServerStateActive}
 	a.serverFirewalls[id] = nil
+}
+
+// addServerWithNestedHypervisor registers a server with nested virtualization
+// in a known state.
+func (a *fakeAPI) addServerWithNestedHypervisor(id int, name string, enabled bool) {
+	a.addServer(id, name)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.servers[id].NestedHypervisor = enabled
+}
+
+// nestedHypervisorOf reports what the fake holds for a server — what the
+// platform would answer the next read.
+func (a *fakeAPI) nestedHypervisorOf(id int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	server, ok := a.servers[id]
+	return ok && server.NestedHypervisor
 }
 
 // failOn makes the next `times` matching requests fail with a 400. The key is
@@ -173,6 +207,14 @@ var (
 	networkPath      = regexp.MustCompile(`^/api/v1/vmware/networks/(\d+)$`)
 	serverFWPath     = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/firewall$`)
 	taskPath         = regexp.MustCompile(`^/api/v1/tasks/(.+)$`)
+
+	locationsPath     = regexp.MustCompile(`^/api/v1/vmware/locations$`)
+	serversPath       = regexp.MustCompile(`^/api/v1/vmware/servers$`)
+	serverPath        = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)$`)
+	serverNamePath    = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/name$`)
+	serverVolumesPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/volumes$`)
+	// The switch action is in the path; there is no request body.
+	serverNestedHypervisorPath = regexp.MustCompile(`^/api/v1/vmware/servers/(\d+)/nested-hypervisor/(enable|disable)$`)
 )
 
 func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
@@ -218,8 +260,20 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.handleEdgeFirewall(w, r)
 	case serverFWPath.MatchString(r.URL.Path):
 		a.handleServerFirewall(w, r)
+	case serverNestedHypervisorPath.MatchString(r.URL.Path):
+		a.handleServerNestedHypervisor(w, r)
+	case serverNamePath.MatchString(r.URL.Path):
+		a.handleServerName(w, r)
+	case serverVolumesPath.MatchString(r.URL.Path):
+		a.handleServerVolumes(w, r)
+	case serverPath.MatchString(r.URL.Path):
+		a.handleServer(w, r)
+	case serversPath.MatchString(r.URL.Path):
+		a.handleServers(w, r)
 	case networkPath.MatchString(r.URL.Path):
 		a.handleNetwork(w, r)
+	case locationsPath.MatchString(r.URL.Path):
+		a.handleLocations(w, r)
 	default:
 		a.fail(w, http.StatusNotFound, -404, "no such endpoint: "+r.URL.Path)
 	}
@@ -414,6 +468,137 @@ func (a *fakeAPI) handleServerFirewall(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
 	}
+}
+
+func (a *fakeAPI) handleServer(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverPath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	server, ok := a.servers[id]
+	a.mu.Unlock()
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	if r.Method != http.MethodGet {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	a.writeJSON(w, map[string]any{"server": server})
+}
+
+// handleServers answers the order: it records the request and creates the
+// machine it describes, so tests can check both what was sent and what the next
+// read brings back.
+func (a *fakeAPI) handleServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	var req entities.VmwareCreateServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "bad body")
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.serverOrders = append(a.serverOrders, req)
+	a.nextID++
+	id := a.nextID
+	server := &entities.VmwareServer{
+		ID: id, LocationID: req.LocationID, Name: req.Name, ImageID: req.ImageID,
+		CPU: req.CPUCount, RamMB: req.RamMB, SystemDiskMB: req.SystemDiskSizeMB,
+		State: entities.VmwareServerStateActive, IsPowerOn: true,
+	}
+	// Omitted means off — the platform's default.
+	if req.NestedHypervisor != nil {
+		server.NestedHypervisor = *req.NestedHypervisor
+	}
+	a.servers[id] = server
+	a.serverFirewalls[id] = nil
+	a.writeJSON(w, entities.VmwareServerOrder{ServerID: id, TaskID: "vmw1006"})
+}
+
+// handleServerVolumes answers the volume list every server apply ends with; no
+// test here uses data disks.
+func (a *fakeAPI) handleServerVolumes(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverVolumesPath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	_, ok := a.servers[id]
+	a.mu.Unlock()
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	a.writeJSON(w, map[string]any{"volumes": []entities.VmwareVolume{}})
+}
+
+// handleLocations answers the location catalog. The envelope matters as much as
+// the values: the SDK reads the list out of a "locations" key.
+func (a *fakeAPI) handleLocations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.writeJSON(w, map[string]any{"locations": a.locations})
+}
+
+// handleServerName renames the machine — the synchronous in-place edit used as
+// the "something else changed" of an Update.
+func (a *fakeAPI) handleServerName(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(serverNamePath.FindStringSubmatch(r.URL.Path)[1])
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	server, ok := a.servers[id]
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	if r.Method != http.MethodPut {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	var req entities.VmwareRenameServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.fail(w, http.StatusBadRequest, -2002, "bad body")
+		return
+	}
+	server.Name = req.Name
+	a.writeJSON(w, map[string]any{})
+}
+
+// handleServerNestedHypervisor switches nested virtualization; a request that
+// matches the current state is answered 200 with a null task id — the
+// idempotent outcome the provider must not await as a task.
+func (a *fakeAPI) handleServerNestedHypervisor(w http.ResponseWriter, r *http.Request) {
+	match := serverNestedHypervisorPath.FindStringSubmatch(r.URL.Path)
+	id, _ := strconv.Atoi(match[1])
+	enable := match[2] == "enable"
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	server, ok := a.servers[id]
+	if !ok {
+		a.fail(w, http.StatusNotFound, -404, "server not found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		a.fail(w, http.StatusMethodNotAllowed, -405, "method not allowed")
+		return
+	}
+	if server.NestedHypervisor == enable {
+		a.writeJSON(w, map[string]any{"task_id": nil})
+		return
+	}
+	server.NestedHypervisor = enable
+	a.writeTask(w, "vmw1007")
 }
 
 func (a *fakeAPI) writeJSON(w http.ResponseWriter, body any) {

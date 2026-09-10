@@ -35,6 +35,8 @@ VMWARE_CONFIG_DUMP=$PWD/vmware_acceptance_configs.md go test ./internal/services
 - [`server/dataSources`](#serverdatasources) — TestAccVmwareServer_dataSources — every VMware data source at once.
 - [`server/byName`](#serverbyname) — TestAccVmwareServer_dataSourceByName — looking a machine up by the name on the screen.
 - [`server/bandwidth`](#serverbandwidth) — TestAccVmwareServer_bandwidthInPlace — the bandwidth of the interface the machine is born with.
+- [`server/nestedHypervisorOn`](#servernestedhypervisoron) — TestAccVmwareServer_nestedHypervisor — ordered with the guest allowed a hypervisor of its own.
+- [`server/nestedHypervisorOff`](#servernestedhypervisoroff) — TestAccVmwareServer_nestedHypervisor — the same machine with nested virtualization switched off in place.
 - [`volumes/one`](#volumesone) — TestAccVmwareServerVolumes_lifecycle — one data disk beside the boot disk.
 - [`volumes/grown`](#volumesgrown) — TestAccVmwareServerVolumes_lifecycle — the same disk renamed and grown by one step of its type.
 - [`volumes/two`](#volumestwo) — TestAccVmwareServerVolumes_lifecycle — a second disk alongside the first.
@@ -409,6 +411,70 @@ resource "vcp_vmware_server" "test" {
   system_disk_mb         = local.system_disk_mb
   system_disk_type       = local.disk_type.title
   network_bandwidth_mbps = 10
+}
+```
+
+## server/nestedHypervisorOn
+
+TestAccVmwareServer_nestedHypervisor — ordered with the guest allowed a hypervisor of its own.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id       = 5
+  name              = "test-acc-vmw-syntax"
+  image_id          = 42
+  cpu               = 1
+  ram_mb            = local.ram_mb
+  system_disk_mb    = local.system_disk_mb
+  system_disk_type  = local.disk_type.title
+  nested_hypervisor = true
+}
+```
+
+## server/nestedHypervisorOff
+
+TestAccVmwareServer_nestedHypervisor — the same machine with nested virtualization switched off in place.
+
+```hcl
+data "vcp_vmware_locations" "all" {}
+
+data "vcp_vmware_images" "all" {
+  location_id = 5
+}
+
+locals {
+  location  = one([for l in data.vcp_vmware_locations.all.locations : l if l.id == 5])
+  image     = one([for i in data.vcp_vmware_images.all.images : i if i.id == 42])
+  disk_type = one([for d in local.location.disk_types : d if d.is_allowed_for_system_disk])
+
+  ram_mb         = max(1024, local.image.min_ram_mb)
+  system_disk_mb = max(local.disk_type.default_size_mb, local.disk_type.min_mb, local.image.hdd_gb * 1024)
+}
+
+resource "vcp_vmware_server" "test" {
+  location_id       = 5
+  name              = "test-acc-vmw-syntax"
+  image_id          = 42
+  cpu               = 1
+  ram_mb            = local.ram_mb
+  system_disk_mb    = local.system_disk_mb
+  system_disk_type  = local.disk_type.title
+  nested_hypervisor = false
 }
 ```
 

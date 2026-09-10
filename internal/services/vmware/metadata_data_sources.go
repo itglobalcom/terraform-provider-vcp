@@ -72,10 +72,13 @@ func NewLocationsDataSource() datasource.DataSource { return &locationsDataSourc
 type locationsDataSource struct{ client *sdk.CloudClient }
 
 type vmwareLocationModel struct {
-	ID           types.Int64                   `tfsdk:"id"`
-	TechTitle    types.String                  `tfsdk:"tech_title"`
-	GpuSupported types.Bool                    `tfsdk:"gpu_supported"`
-	DiskTypes    []vmwareLocationDiskTypeModel `tfsdk:"disk_types"`
+	ID           types.Int64  `tfsdk:"id"`
+	TechTitle    types.String `tfsdk:"tech_title"`
+	GpuSupported types.Bool   `tfsdk:"gpu_supported"`
+	// NestedHypervisorSupported is derived from the VDCs the project may be
+	// provisioned in, so the same location can report differently per project.
+	NestedHypervisorSupported types.Bool                    `tfsdk:"nested_hypervisor_supported"`
+	DiskTypes                 []vmwareLocationDiskTypeModel `tfsdk:"disk_types"`
 }
 
 // vmwareLocationDiskTypeModel is a disk type offered inside a location (API-11
@@ -110,6 +113,9 @@ func (d *locationsDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 						"id":            schema.Int64Attribute{Computed: true},
 						"tech_title":    schema.StringAttribute{Computed: true},
 						"gpu_supported": schema.BoolAttribute{Computed: true},
+						"nested_hypervisor_supported": schema.BoolAttribute{Computed: true,
+							Description: "Whether a VDC available to this project in the location supports the " +
+								"Nested hypervisor setting, which is what vcp_vmware_server.nested_hypervisor needs."},
 						"disk_types": schema.ListNestedAttribute{
 							Computed: true,
 							NestedObject: schema.NestedAttributeObject{
@@ -158,10 +164,11 @@ func (d *locationsDataSource) Read(ctx context.Context, _ datasource.ReadRequest
 			})
 		}
 		state.Locations = append(state.Locations, vmwareLocationModel{
-			ID:           types.Int64Value(int64(l.ID)),
-			TechTitle:    types.StringValue(l.TechTitle),
-			GpuSupported: types.BoolValue(l.GPUSupported),
-			DiskTypes:    diskTypes,
+			ID:                        types.Int64Value(int64(l.ID)),
+			TechTitle:                 types.StringValue(l.TechTitle),
+			GpuSupported:              types.BoolValue(l.GPUSupported),
+			NestedHypervisorSupported: types.BoolValue(l.NestedHypervisorSupported),
+			DiskTypes:                 diskTypes,
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

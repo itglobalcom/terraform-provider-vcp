@@ -194,10 +194,10 @@ func TestValidateServerVolumes(t *testing.T) {
 	}
 }
 
-// The server's ValidateConfig, driven the way the framework drives it. The two
+// The server's ValidateConfig, driven the way the framework drives it. The three
 // things it decides — a bandwidth that contradicts the network it is ordered on,
-// and a disk list that cannot be told apart — are both settled before anything
-// is created.
+// two mutually exclusive platform features asked for at once, and a disk list
+// that cannot be told apart — are all settled before anything is created.
 func TestServerValidateConfig(t *testing.T) {
 	res := &serverResource{}
 	s := resourceSchema(t, res)
@@ -259,6 +259,48 @@ func TestServerValidateConfig(t *testing.T) {
 		}
 	})
 
+	// The platform refuses an order that asks for both; the validator moves the
+	// failure to plan time.
+	t.Run("a GPU and a nested hypervisor are not both possible", func(t *testing.T) {
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		model.NestedHypervisor = types.BoolValue(true)
+
+		diags := validate(model)
+		if !diags.HasError() {
+			t.Fatal("gpu with nested_hypervisor must be refused at plan time")
+		}
+		if got := diags.Errors()[0].Summary(); got != "Conflicting Attributes" {
+			t.Errorf("unexpected error: %q", got)
+		}
+	})
+
+	t.Run("a GPU machine may still say nested_hypervisor = false", func(t *testing.T) {
+		// Stating the platform's default explicitly is not a conflict and must
+		// not be blocked.
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		model.NestedHypervisor = types.BoolValue(false)
+
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("nested_hypervisor = false alongside gpu must pass: %v", diags)
+		}
+	})
+
+	t.Run("either feature alone is fine", func(t *testing.T) {
+		model := base()
+		model.Gpu = gpuObject(t, 3, 8192, 1)
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("gpu alone must pass: %v", diags)
+		}
+
+		model = base()
+		model.NestedHypervisor = types.BoolValue(true)
+		if diags := validate(model); diags.HasError() {
+			t.Errorf("nested_hypervisor alone must pass: %v", diags)
+		}
+	})
+
 	t.Run("the disk list is checked too", func(t *testing.T) {
 		model := base()
 		model.Volumes = []serverVolumeModel{
@@ -274,4 +316,19 @@ func TestServerValidateConfig(t *testing.T) {
 			t.Errorf("unexpected error: %q", got)
 		}
 	})
+}
+
+// gpuObject is the `gpu` attribute a configuration would carry — the whole triple,
+// which is the only shape the API accepts.
+func gpuObject(t *testing.T, modelID, vramMB, cardCount int64) types.Object {
+	t.Helper()
+	obj, diags := types.ObjectValue(gpuAttrTypes, map[string]attr.Value{
+		"model_id":   types.Int64Value(modelID),
+		"vram_mb":    types.Int64Value(vramMB),
+		"card_count": types.Int64Value(cardCount),
+	})
+	if diags.HasError() {
+		t.Fatalf("building the gpu object: %v", diags)
+	}
+	return obj
 }
