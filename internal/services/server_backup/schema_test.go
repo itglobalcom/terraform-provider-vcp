@@ -254,10 +254,10 @@ func TestExpandSchedule(t *testing.T) {
 	}
 
 	weekly := expandSchedule(backupModel{
-		Weekly: &weeklyRuleModel{Keep: types.Int64Value(4), BackupStorageID: types.Int64Value(5), Weekday: types.Int64Value(7)},
+		Weekly: &weeklyRuleModel{Keep: types.Int64Value(4), BackupStorageID: types.Int64Value(5), Weekday: types.StringValue("sunday")},
 	}).Weekly
-	if weekly == nil || weekly.Keep != 4 || weekly.BackupStorageID != 5 || weekly.Weekday != 7 {
-		t.Errorf("weekly = %+v, want keep 4 storage 5 weekday 7", weekly)
+	if weekly == nil || weekly.Keep != 4 || weekly.BackupStorageID != 5 || weekly.Weekday != entities.BackupWeekdaySunday {
+		t.Errorf("weekly = %+v, want keep 4 storage 5 weekday sunday", weekly)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestMapServerBackup_roundTrip(t *testing.T) {
 		Hour:     types.Int64Value(23),
 		Minute:   types.Int64Value(5),
 		Daily:    &dailyRuleModel{Keep: types.Int64Value(7), BackupStorageID: types.Int64Value(3)},
-		Weekly:   &weeklyRuleModel{Keep: types.Int64Value(4), BackupStorageID: types.Int64Value(3), Weekday: types.Int64Value(1)},
+		Weekly:   &weeklyRuleModel{Keep: types.Int64Value(4), BackupStorageID: types.Int64Value(3), Weekday: types.StringValue("monday")},
 		Monthly:  &monthlyRuleModel{Keep: types.Int64Value(2), BackupStorageID: types.Int64Value(9), DayOfMonth: types.StringValue("15")},
 	}
 
@@ -295,7 +295,7 @@ func TestMapServerBackup_rulesMissing(t *testing.T) {
 	var diags diag.Diagnostics
 	got, ok := mapServerBackup("l1s2", &entities.ServerBackup{Enabled: true, Schedule: &entities.BackupSchedule{
 		Hour:   1,
-		Weekly: &entities.BackupWeeklyRule{BackupRule: entities.BackupRule{Keep: 4, BackupStorageID: 3}, Weekday: 7},
+		Weekly: &entities.BackupWeeklyRule{BackupRule: entities.BackupRule{Keep: 4, BackupStorageID: 3}, Weekday: entities.BackupWeekdaySunday},
 	}}, &diags)
 	if !ok || diags.HasError() {
 		t.Fatalf("mapServerBackup failed: %v", diags)
@@ -303,8 +303,8 @@ func TestMapServerBackup_rulesMissing(t *testing.T) {
 	if got.Daily != nil || got.Monthly != nil {
 		t.Errorf("daily = %+v, monthly = %+v, want both nil (null in state)", got.Daily, got.Monthly)
 	}
-	if got.Weekly == nil || got.Weekly.Weekday.ValueInt64() != 7 {
-		t.Errorf("weekly = %+v, want weekday 7", got.Weekly)
+	if got.Weekly == nil || got.Weekly.Weekday.ValueString() != "sunday" {
+		t.Errorf("weekly = %+v, want weekday sunday", got.Weekly)
 	}
 	if got.Minute.ValueInt64() != 0 {
 		t.Errorf("minute = %v, want 0", got.Minute)
@@ -380,7 +380,7 @@ func TestValidateConfig_requiresARule(t *testing.T) {
 	}
 
 	if diags := validate(map[string]tftypes.Value{"weekly": ruleValue(t, s, "weekly", 4, 3,
-		map[string]tftypes.Value{"weekday": tftypes.NewValue(tftypes.Number, 7)})}); diags.HasError() {
+		map[string]tftypes.Value{"weekday": tftypes.NewValue(tftypes.String, "sunday")})}); diags.HasError() {
 		t.Errorf("a schedule with a weekly rule must pass, got %v", diags)
 	}
 

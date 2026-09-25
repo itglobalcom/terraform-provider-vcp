@@ -42,7 +42,7 @@ resource "vcp_server_backup" "example" {
   weekly = {
     keep              = 4
     backup_storage_id = data.vcp_server_backup_storages.example.storages[0].id
-    weekday           = 7
+    weekday           = "sunday"
   }
 
   monthly = {
@@ -98,7 +98,7 @@ Required:
 
 - `backup_storage_id` (Number) ID of the storage the copies are kept in — an `id` from `vcp_server_backup_storages`. Changing it is applied in place.
 - `keep` (Number) How many `weekly` copies are kept; the oldest is deleted when a new one is taken. At most `limits.weekly.max_keep` of `vcp_server_backup_storages`.
-- `weekday` (Number) Day of the week the copy is taken on: `1` is Monday, `7` is Sunday.
+- `weekday` (String) Day of the week the copy is taken on: `"monday"`, `"tuesday"`, `"wednesday"`, `"thursday"`, `"friday"`, `"saturday"` or `"sunday"`.
 
 ## Import
 

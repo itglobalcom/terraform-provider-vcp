@@ -18,7 +18,7 @@ resource "vcp_server_backup" "example" {
   weekly = {
     keep              = 4
     backup_storage_id = data.vcp_server_backup_storages.example.storages[0].id
-    weekday           = 7
+    weekday           = "sunday"
   }
 
   monthly = {

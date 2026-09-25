@@ -53,9 +53,9 @@ type dailyRuleModel struct {
 }
 
 type weeklyRuleModel struct {
-	Keep            types.Int64 `tfsdk:"keep"`
-	BackupStorageID types.Int64 `tfsdk:"backup_storage_id"`
-	Weekday         types.Int64 `tfsdk:"weekday"`
+	Keep            types.Int64  `tfsdk:"keep"`
+	BackupStorageID types.Int64  `tfsdk:"backup_storage_id"`
+	Weekday         types.String `tfsdk:"weekday"`
 }
 
 type monthlyRuleModel struct {
@@ -74,6 +74,19 @@ func daysOfMonth() []string {
 		days = append(days, strconv.Itoa(d))
 	}
 	return append(days, entities.BackupDayOfMonthLast)
+}
+
+// weekdays are the values weekday takes.
+func weekdays() []string {
+	return []string{
+		string(entities.BackupWeekdayMonday),
+		string(entities.BackupWeekdayTuesday),
+		string(entities.BackupWeekdayWednesday),
+		string(entities.BackupWeekdayThursday),
+		string(entities.BackupWeekdayFriday),
+		string(entities.BackupWeekdaySaturday),
+		string(entities.BackupWeekdaySunday),
+	}
 }
 
 func (r *backupResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -149,10 +162,11 @@ func (r *backupResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				MarkdownDescription: "Weekly rule: a copy on one day of the week. Omit it to take no weekly copies.",
 				Optional:            true,
 				Attributes: ruleAttributes("weekly", map[string]schema.Attribute{
-					"weekday": schema.Int64Attribute{
-						MarkdownDescription: "Day of the week the copy is taken on: `1` is Monday, `7` is Sunday.",
-						Required:            true,
-						Validators:          []validator.Int64{int64validator.Between(1, 7)},
+					"weekday": schema.StringAttribute{
+						MarkdownDescription: "Day of the week the copy is taken on: `\"monday\"`, `\"tuesday\"`, " +
+							"`\"wednesday\"`, `\"thursday\"`, `\"friday\"`, `\"saturday\"` or `\"sunday\"`.",
+						Required:   true,
+						Validators: []validator.String{stringvalidator.OneOf(weekdays()...)},
 					},
 				}),
 			},
@@ -357,7 +371,7 @@ func expandSchedule(m backupModel) *entities.BackupSchedule {
 				Keep:            int(w.Keep.ValueInt64()),
 				BackupStorageID: int(w.BackupStorageID.ValueInt64()),
 			},
-			Weekday: int(w.Weekday.ValueInt64()),
+			Weekday: entities.BackupWeekday(w.Weekday.ValueString()),
 		}
 	}
 	if mo := m.Monthly; mo != nil {
@@ -407,7 +421,7 @@ func mapServerBackup(serverID string, b *entities.ServerBackup, diags *diag.Diag
 		m.Weekly = &weeklyRuleModel{
 			Keep:            types.Int64Value(int64(w.Keep)),
 			BackupStorageID: types.Int64Value(int64(w.BackupStorageID)),
-			Weekday:         types.Int64Value(int64(w.Weekday)),
+			Weekday:         types.StringValue(string(w.Weekday)),
 		}
 	}
 	if mo := s.Monthly; mo != nil {

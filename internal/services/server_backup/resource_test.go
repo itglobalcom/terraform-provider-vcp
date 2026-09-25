@@ -73,7 +73,7 @@ func TestAccServerBackup_lifecycle(t *testing.T) {
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(backupResourceName, tfjsonpath.New("weekly").AtMapKey("weekday"),
-						knownvalue.Int64Exact(7)),
+						knownvalue.StringExact("sunday")),
 				},
 				Check: checkBackupSchedule(3, 5, true),
 			},
@@ -219,7 +219,7 @@ resource "vcp_server_backup" "test" {
   weekly = {
     keep              = 2
     backup_storage_id = data.vcp_server_backup_storages.test.storages[0].id
-    weekday           = 7
+    weekday           = "sunday"
   }
 }
 `
