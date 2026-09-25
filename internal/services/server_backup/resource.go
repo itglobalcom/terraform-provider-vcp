@@ -211,10 +211,15 @@ func (r *backupResource) Create(ctx context.Context, req resource.CreateRequest,
 	defer locks.Server(serverID)()
 
 	tflog.Info(ctx, "Enabling server backup", map[string]any{"server_id": serverID})
+	before, snapErr := r.client.GetServerBackup(ctx, serverID)
+
 	backup, err := r.client.EnableServerBackupAndWait(ctx, serverID, expandSchedule(plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Error Enabling Server Backup",
 			fmt.Sprintf("Could not enable the backup service of server %s: %s", serverID, err.Error()))
+		if snapErr == nil && !before.Enabled {
+			r.recordEnabledBackup(ctx, serverID, resp)
+		}
 		return
 	}
 
@@ -223,6 +228,23 @@ func (r *backupResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+// recordEnabledBackup writes the service into state when the enabling request
+// went through but its wait failed, so the next apply does not enable it again.
+func (r *backupResource) recordEnabledBackup(ctx context.Context, serverID string, resp *resource.CreateResponse) {
+	backup, err := r.client.GetServerBackup(ctx, serverID)
+	if err != nil || !backup.Enabled {
+		return
+	}
+	var mapDiags diag.Diagnostics
+	state, ok := mapServerBackup(serverID, backup, &mapDiags)
+	if !ok {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+	resp.Diagnostics.AddWarning("Backup Recorded Despite Error",
+		fmt.Sprintf("The backup service of server %s is enabled and was recorded in state; the resource is tainted and the next apply replaces it.", serverID))
 }
 
 func (r *backupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
