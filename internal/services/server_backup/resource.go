@@ -290,8 +290,6 @@ func (r *backupResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	serverID := state.ServerID.ValueString()
 	defer locks.Server(serverID)()
 
-	// A server that is gone took the service with it, and a service disabled
-	// out of band leaves nothing to disable.
 	backup, err := r.client.GetServerBackup(ctx, serverID)
 	switch {
 	case err != nil && sdk.IsNotFound(err):
