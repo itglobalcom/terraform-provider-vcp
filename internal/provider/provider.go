@@ -222,6 +222,7 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		gateway.NewGatewayResource,
 		server_pubif.NewResource,
 		server_snapshot.NewResource,
+		server_backup.NewResource,
 		server_attachment.NewResource,
 		gateway_attachment.NewResource,
 		gateway_rules.NewNATResource,
