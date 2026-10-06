@@ -22,6 +22,7 @@ import (
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/isolated_network"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/metadata"
 	vstack_server "github.com/itglobalcom/terraform-provider-vcp/internal/services/server"
+	server_backup "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_backup"
 	server_attachment "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_network_attachment"
 	server_pubif "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_public_interface"
 	server_snapshot "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_snapshot"
@@ -221,6 +222,7 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		gateway.NewGatewayResource,
 		server_pubif.NewResource,
 		server_snapshot.NewResource,
+		server_backup.NewResource,
 		server_attachment.NewResource,
 		gateway_attachment.NewResource,
 		gateway_rules.NewNATResource,
@@ -255,6 +257,7 @@ func (p *CloudProvider) DataSources(ctx context.Context) []func() datasource.Dat
 		vstack_server.NewServerDataSource,
 		vstack_server.NewServersDataSource,
 		server_snapshot.NewSnapshotsDataSource,
+		server_backup.NewStoragesDataSource,
 		gateway.NewGatewayDataSource,
 		gateway.NewGatewaysDataSource,
 		dns.NewDomainDataSource,
