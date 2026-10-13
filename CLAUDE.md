@@ -61,8 +61,6 @@ that resource's `ValidateConfig` — an `AddAttributeError` on the attribute to 
 unit test — rather than left to the API to refuse mid-apply. Today the only resource doing that is
 `internal/services/vmware/server_resource.go` (`public_network_id` × `network_bandwidth_mbps`,
 `gpu` × `nested_hypervisor`); both sides of such a pair should name the conflict in their schema
-description, and `gpu` still does not. `ValidateConfig` is neither only for conflicts nor
-everywhere: nine of the twenty registered resources have one, the other eight covering what a type
-requires or forbids, uniqueness within a set, or the size of a rule set. No data source has one —
-`internal/services/vmware/server_data_sources.go` refuses `id` together with `name` in its `Read`
-instead.
+description, and `gpu` still does not. Any other check the configuration alone decides — what a type
+requires or forbids, uniqueness within a set, the size of a rule set — goes there too; a data source
+makes it in its `Read`.
