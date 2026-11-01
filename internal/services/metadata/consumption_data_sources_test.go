@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
@@ -301,6 +302,13 @@ func TestProjectConsumptionSchemas(t *testing.T) {
 				if a.GetMarkdownDescription() == "" {
 					t.Errorf("%s has no description, and the description is the documentation", name)
 				}
+				if list, ok := a.(schema.ListNestedAttribute); ok {
+					for nested, na := range list.NestedObject.Attributes {
+						if na.GetMarkdownDescription() == "" {
+							t.Errorf("%s.%s has no description", name, nested)
+						}
+					}
+				}
 				switch name {
 				case "from", "to":
 					if !a.IsOptional() || !a.IsComputed() {
@@ -317,5 +325,48 @@ func TestProjectConsumptionSchemas(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A refused read (the fake answers 404 to a route it does not serve) must end
+// as an error diagnostic of Read with no state written: a Read that swallowed
+// the error would leave an empty envelope looking like a period without charges.
+func TestProjectConsumptionReadReportsAPIRefusal(t *testing.T) {
+	for name, ctor := range map[string]func() datasource.DataSource{
+		"consumption":           NewProjectConsumptionDataSource,
+		"consumption_resources": NewProjectConsumptionResourcesDataSource,
+		"consumption_daily":     NewProjectConsumptionDailyDataSource,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newConsumptionFake(t, map[string]string{})
+			resp := readConsumption(t, f, ctor, map[string]string{"from": "2026-10-01", "to": "2026-10-31"})
+			if !resp.Diagnostics.HasError() {
+				t.Fatal("the Read accepted a refused call")
+			}
+			if !resp.State.Raw.IsNull() {
+				t.Errorf("state = %v, want none written", resp.State.Raw)
+			}
+		})
+	}
+}
+
+// A period without charges answers with an empty breakdown; it must land as an
+// empty list, not null: `length(...services)` on a null list fails the plan.
+func TestProjectConsumptionReadKeepsEmptyBreakdownAList(t *testing.T) {
+	f := newConsumptionFake(t, map[string]string{
+		"/project/consumption/daily": `{"consumption":{` + consumptionEnvelopeJSON + `,"days":[]}}`,
+		"/project/consumption":       `{"consumption":{` + consumptionEnvelopeJSON + `,"services":[]}}`,
+	})
+
+	var services projectConsumptionModel
+	getState(t, readConsumption(t, f, NewProjectConsumptionDataSource, nil), &services)
+	if services.Services == nil || len(services.Services) != 0 {
+		t.Errorf("services = %#v, want an empty list", services.Services)
+	}
+
+	var daily projectConsumptionDailyModel
+	getState(t, readConsumption(t, f, NewProjectConsumptionDailyDataSource, nil), &daily)
+	if daily.Days == nil || len(daily.Days) != 0 {
+		t.Errorf("days = %#v, want an empty list", daily.Days)
 	}
 }
