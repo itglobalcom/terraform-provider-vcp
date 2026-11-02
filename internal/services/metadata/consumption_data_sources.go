@@ -29,6 +29,7 @@ const consumptionTypeValues = "`vstack_server`, `vstack_edge`, `vmware_server`, 
 	"`unoc_v2_web_user`, `unoc_v2_terminal_server`, `unoc_v2_additional_infobases`, " +
 	"`unoc_v2_additional_infobase_size`, `unoc_v2_infobase_backup`, `monitoring_host`, " +
 	"`object_storage`, `cdn_site`, `cdn_s3_resource`, `cdn_vod`, `stream`, `llm_access_key`, " +
+	"`llm_credits`, `llm_package`, " +
 	"`managed_servers_subscription`, `manual_billing`"
 
 const consumptionPeriodNote = "\n\nThe period is counted in the partner's time zone (`time_zone`) and both ends are " +
