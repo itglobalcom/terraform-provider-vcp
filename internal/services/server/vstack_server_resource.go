@@ -76,13 +76,17 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			// List + RequiresReplace would plan a destructive server replacement on
 			// a pure reorder in config.
 			"applications_ids": schema.SetAttribute{
-				MarkdownDescription: "Set of application IDs to install on the server. Only applied during creation. **Changing this forces a new resource.**",
-				Optional:            true,
-				ElementType:         types.StringType,
+				MarkdownDescription: "Set of application IDs to install on the server, without parameters. Only applied during creation. " +
+					"**Changing this forces a new resource.** Conflicts with `applications`, which also takes parameter values " +
+					"and a language model key; set one or the other.",
+				Optional:    true,
+				ElementType: types.StringType,
 				PlanModifiers: []planmodifier.Set{
 					setplanmodifier.RequiresReplace(),
 				},
 			},
+			"applications":              applicationsSchemaAttribute(),
+			"application_installations": applicationInstallationsSchemaAttribute(),
 			"init_script": schema.StringAttribute{
 				MarkdownDescription: "Bash init script. It will run once on the first start. Only applied during creation. **Changing this forces a new resource.**",
 				Optional:            true,
@@ -247,6 +251,8 @@ func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.Valida
 			resp.Diagnostics.AddError("Invalid Volume Size", err.Error())
 		}
 	}
+
+	validateApplications(ctx, data, &resp.Diagnostics)
 }
 
 func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -269,6 +275,11 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	// Build application IDs for API
 	applicationIDs := r.buildApplicationIDs(data.ApplicationsIDs)
+	applications, appDiags := buildApplicationSpecs(ctx, data.Applications)
+	resp.Diagnostics.Append(appDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// The server is created without NICs; interfaces are attached afterwards via
 	// the vcp_server_public_interface / vcp_server_network_attachment resources.
@@ -287,6 +298,7 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 		Networks:       []entities.NetworkSpec{},
 		SSHKeyIDs:      sshKeyIDs,
 		ApplicationIDs: applicationIDs,
+		Applications:   applications,
 	}
 
 	// Add init script if specified
@@ -359,8 +371,8 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 		data.Tags = planTags
 	}
 
-	// Preserve init_script and applications_ids from plan (API doesn't return them)
-	// They are already in data from the plan
+	// init_script, applications_ids and applications are not returned by the
+	// API and stay as planned.
 
 	// Validate volume count. Error without return: the server must still be
 	// recorded in state below (tainted) — returning here would orphan it.
@@ -403,6 +415,7 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	stateAffinityGroupID := data.AffinityGroupID
 	stateInitScript := data.InitScript
 	stateApplicationsIDs := data.ApplicationsIDs
+	stateApplications := data.Applications
 
 	usedNumbers := make(map[int64]bool)
 	for _, num := range stateVolumeNumbers {
@@ -443,6 +456,7 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if len(stateApplicationsIDs) > 0 {
 		data.ApplicationsIDs = stateApplicationsIDs
 	}
+	data.Applications = stateApplications
 
 	// Restore volume numbers and order
 	r.restoreAndAssignVolumeNumbers(&data.Volumes, stateVolumeNumbers, usedNumbers)
@@ -599,6 +613,7 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// Preserve init_script and applications_ids from plan (API doesn't return them)
 	finalState.InitScript = plan.InitScript
 	finalState.ApplicationsIDs = plan.ApplicationsIDs
+	finalState.Applications = plan.Applications
 
 	// Preserve SSH key IDs from plan
 	finalState.SSHKeyIDs = plan.SSHKeyIDs
@@ -637,6 +652,7 @@ func (r *ServerResource) persistServerState(ctx context.Context, serverID string
 	// Not returned by the API; keep the prior values.
 	data.InitScript = state.InitScript
 	data.ApplicationsIDs = state.ApplicationsIDs
+	data.Applications = state.Applications
 	if len(state.SSHKeyIDs) > 0 {
 		data.SSHKeyIDs = state.SSHKeyIDs
 	}
@@ -717,7 +733,7 @@ func (r *ServerResource) ImportState(ctx context.Context, req resource.ImportSta
 		return
 	}
 
-	var data ServerResourceModel
+	data := ServerResourceModel{Applications: applicationsNull()}
 	r.mapServerToModel(ctx, server, &data)
 
 	// Auto-generate volume numbers based on index
@@ -725,7 +741,7 @@ func (r *ServerResource) ImportState(ctx context.Context, req resource.ImportSta
 		data.Volumes[i].Number = types.Int64Value(int64(i))
 	}
 
-	// Set init_script and applications_ids to null (not available from API)
+	// Set init_script, applications_ids and applications to null (not available from API)
 	data.InitScript = types.StringNull()
 	data.ApplicationsIDs = nil
 
@@ -749,7 +765,8 @@ func (r *ServerResource) ImportState(ctx context.Context, req resource.ImportSta
 				"Network interfaces are separate resources (vcp_server_public_interface, "+
 				"vcp_server_network_attachment) and must be imported separately. "+
 				"SSH keys are only applied at creation and cannot be modified. "+
-				"init_script and applications_ids are not available from API and must be set manually if needed. "+
+				"init_script, applications_ids and applications are not available from API and must be set manually if needed; "+
+				"setting them on an imported server replaces it. "+
 				"Review and update your configuration accordingly.",
 			serverID,
 			len(data.Volumes),
@@ -816,6 +833,8 @@ func (r *ServerResource) mapServerToModel(ctx context.Context, server *entities.
 
 	// Map volumes
 	model.Volumes = r.mapVolumesFromServer(server.Volumes)
+
+	mapApplicationInstallations(server.ApplicationInstallations, model)
 }
 
 func (r *ServerResource) restoreVolumeNumbersFromPlan(apiVolumes *[]VolumeAttrModel, planVolumes []VolumeAttrModel) {
