@@ -3,17 +3,26 @@ package metadata_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	tfjson "github.com/hashicorp/terraform-json"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/acctest"
+	"github.com/itglobalcom/terraform-provider-vcp/internal/services/metadata"
+	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
 )
 
 // ----------------------------------------------------------------------
@@ -277,6 +286,117 @@ data "vcp_applications" "test" {
   location_id = %q
 }
 `, locationID)
+}
+
+// applicationsCatalogJSON is the catalog as the API sends it: one application
+// offered a key, with an ordinary, a defaulted, a key and an endpoint parameter,
+// and one in the minimal shape, where every optional field is left out.
+const applicationsCatalogJSON = `{"applications":[
+	{"id":"n8n","location_id":"dc-1","images":["img-ubuntu-24"],"llm_key_enabled":true,
+	 "credentials_mode":"ServicePassword",
+	 "parameters":[
+		{"name":"N8N_ENCRYPTION_KEY","required":true,"secret":true},
+		{"name":"N8N_HOST","required":false,"default":"localhost","secret":false},
+		{"name":"N8N_LLM_KEY","required":true,"secret":true,"llm_kind":"Key"},
+		{"name":"N8N_LLM_ENDPOINT","required":true,"secret":false,"llm_kind":"Endpoint"}
+	 ]},
+	{"id":"redis","location_id":"dc-1","images":["img-debian-12"],"llm_key_enabled":false,"parameters":[]}
+]}`
+
+// readApplications reads vcp_applications against a fake answering the
+// catalog route with body.
+func readApplications(t *testing.T, body string) metadata.ApplicationsDataSourceModel {
+	t.Helper()
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/applications") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	config, err := sdk.NewConfig("test-token", srv.URL)
+	if err != nil {
+		t.Fatalf("building the SDK config: %v", err)
+	}
+	client, err := sdk.NewClient(config)
+	if err != nil {
+		t.Fatalf("building the SDK client: %v", err)
+	}
+
+	ds := metadata.NewApplicationsDataSource().(datasource.DataSourceWithConfigure)
+	var configureResp datasource.ConfigureResponse
+	ds.Configure(ctx, datasource.ConfigureRequest{ProviderData: client}, &configureResp)
+	if configureResp.Diagnostics.HasError() {
+		t.Fatalf("configuring the data source: %v", configureResp.Diagnostics)
+	}
+
+	var schemaResp datasource.SchemaResponse
+	ds.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	s := schemaResp.Schema
+	objectType := s.Type().TerraformType(ctx).(tftypes.Object)
+	values := map[string]tftypes.Value{}
+	for name, typ := range objectType.AttributeTypes {
+		values[name] = tftypes.NewValue(typ, nil)
+	}
+
+	resp := datasource.ReadResponse{State: tfsdk.State{Schema: s, Raw: tftypes.NewValue(objectType, nil)}}
+	ds.Read(ctx, datasource.ReadRequest{Config: tfsdk.Config{Schema: s, Raw: tftypes.NewValue(objectType, values)}}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("reading the data source: %v", resp.Diagnostics)
+	}
+
+	var got metadata.ApplicationsDataSourceModel
+	if diags := resp.State.Get(ctx, &got); diags.HasError() {
+		t.Fatalf("reading the state back: %v", diags)
+	}
+	return got
+}
+
+// TestApplicationsDataSourceMapsParametersAndLLMKey maps the catalog literal
+// into state: llm_key_enabled is what decides whether issue_llm_key is
+// accepted, the parameter flags must not be swapped, and a missing default or
+// llm_kind must be null rather than "", or a config comparing them to null
+// would never match.
+func TestApplicationsDataSourceMapsParametersAndLLMKey(t *testing.T) {
+	got := readApplications(t, applicationsCatalogJSON)
+
+	if len(got.Applications) != 2 {
+		t.Fatalf("got %d applications, want 2", len(got.Applications))
+	}
+	n8n, redis := got.Applications[0], got.Applications[1]
+
+	if !n8n.LLMKeyEnabled.Equal(types.BoolValue(true)) {
+		t.Errorf("n8n llm_key_enabled = %s, want true", n8n.LLMKeyEnabled)
+	}
+	if !redis.LLMKeyEnabled.Equal(types.BoolValue(false)) {
+		t.Errorf("redis llm_key_enabled = %s, want false", redis.LLMKeyEnabled)
+	}
+
+	want := []metadata.ApplicationParameterModel{
+		{Name: types.StringValue("N8N_ENCRYPTION_KEY"), Required: types.BoolValue(true), Secret: types.BoolValue(true), Default: types.StringNull(), LLMKind: types.StringNull()},
+		{Name: types.StringValue("N8N_HOST"), Required: types.BoolValue(false), Secret: types.BoolValue(false), Default: types.StringValue("localhost"), LLMKind: types.StringNull()},
+		{Name: types.StringValue("N8N_LLM_KEY"), Required: types.BoolValue(true), Secret: types.BoolValue(true), Default: types.StringNull(), LLMKind: types.StringValue("Key")},
+		{Name: types.StringValue("N8N_LLM_ENDPOINT"), Required: types.BoolValue(true), Secret: types.BoolValue(false), Default: types.StringNull(), LLMKind: types.StringValue("Endpoint")},
+	}
+	if len(n8n.Parameters) != len(want) {
+		t.Fatalf("n8n has %d parameters, want %d", len(n8n.Parameters), len(want))
+	}
+	for i, w := range want {
+		p := n8n.Parameters[i]
+		if !p.Name.Equal(w.Name) || !p.Required.Equal(w.Required) || !p.Secret.Equal(w.Secret) ||
+			!p.Default.Equal(w.Default) || !p.LLMKind.Equal(w.LLMKind) {
+			t.Errorf("parameter %d = %+v, want %+v", i, p, w)
+		}
+	}
+
+	if redis.Parameters == nil || len(redis.Parameters) != 0 {
+		t.Errorf("redis parameters = %#v, want an empty list", redis.Parameters)
+	}
 }
 
 // ----------------------------------------------------------------------
