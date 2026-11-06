@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	tfjson "github.com/hashicorp/terraform-json"
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
@@ -275,4 +277,136 @@ data "vcp_applications" "test" {
   location_id = %q
 }
 `, locationID)
+}
+
+// ----------------------------------------------------------------------
+// project consumption
+// ----------------------------------------------------------------------
+
+// lastMonth returns the first and the last day of the previous month: a closed
+// period, so is_final is true and the amounts no longer move between steps.
+func lastMonth() (string, string) {
+	firstOfThisMonth := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
+	from := firstOfThisMonth.AddDate(0, -1, 0)
+	to := firstOfThisMonth.AddDate(0, 0, -1)
+	return from.Format(time.DateOnly), to.Format(time.DateOnly)
+}
+
+// TestAccProjectConsumption_defaultPeriod reads the three data sources without
+// a period: from/to must come back resolved, not null, and the currency must be
+// the project's own.
+func TestAccProjectConsumption_defaultPeriod(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+data "vcp_project" "current" {}
+data "vcp_project_consumption" "test" {}
+data "vcp_project_consumption_resources" "test" {}
+data "vcp_project_consumption_daily" "test" {}
+`,
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("from"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("to"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("time_zone"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("total"), knownvalue.NotNull()),
+					// The period reaches today, so the last day is still being billed.
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("is_final"), knownvalue.Bool(false)),
+					statecheck.CompareValuePairs(
+						"data.vcp_project_consumption.test", tfjsonpath.New("currency"),
+						"data.vcp_project.current", tfjsonpath.New("currency"),
+						compare.ValuesSame(),
+					),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption_resources.test", tfjsonpath.New("resources"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption_daily.test", tfjsonpath.New("days"), knownvalue.NotNull()),
+				},
+			},
+		},
+	})
+}
+
+// TestAccProjectConsumption_closedPeriod reads last month: the period comes back
+// as configured, is_final is true, every day of the month is listed, and the
+// per-service and per-day reads agree on the total.
+func TestAccProjectConsumption_closedPeriod(t *testing.T) {
+	from, to := lastMonth()
+	end, _ := time.Parse(time.DateOnly, to)
+	days := end.Day()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+data "vcp_project_consumption" "test" {
+  from = %[1]q
+  to   = %[2]q
+}
+
+data "vcp_project_consumption_resources" "test" {
+  from = %[1]q
+  to   = %[2]q
+}
+
+data "vcp_project_consumption_daily" "test" {
+  from = %[1]q
+  to   = %[2]q
+}
+`, from, to),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("from"), knownvalue.StringExact(from)),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("to"), knownvalue.StringExact(to)),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption.test", tfjsonpath.New("is_final"), knownvalue.Bool(true)),
+					statecheck.ExpectKnownValue("data.vcp_project_consumption_daily.test", tfjsonpath.New("days"), knownvalue.ListSizeExact(days)),
+					statecheck.ExpectKnownValue(
+						"data.vcp_project_consumption_daily.test",
+						tfjsonpath.New("days").AtSliceIndex(0).AtMapKey("date"),
+						knownvalue.StringExact(from),
+					),
+					statecheck.CompareValuePairs(
+						"data.vcp_project_consumption.test", tfjsonpath.New("total"),
+						"data.vcp_project_consumption_daily.test", tfjsonpath.New("total"),
+						compare.ValuesSame(),
+					),
+					statecheck.CompareValuePairs(
+						"data.vcp_project_consumption.test", tfjsonpath.New("total"),
+						"data.vcp_project_consumption_resources.test", tfjsonpath.New("total"),
+						compare.ValuesSame(),
+					),
+				},
+			},
+		},
+	})
+}
+
+// TestAccProjectConsumption_resourcesByService filters the resources by one
+// service: the filter stays as configured and every listed resource belongs to it.
+func TestAccProjectConsumption_resourcesByService(t *testing.T) {
+	dataSourceName := "data.vcp_project_consumption_resources.vstack"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+data "vcp_project_consumption_resources" "vstack" {
+  service = "vstack"
+}
+
+output "foreign_services" {
+  value = [for r in data.vcp_project_consumption_resources.vstack.resources : r.service if r.service != "vstack"]
+}
+`,
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(dataSourceName, tfjsonpath.New("service"), knownvalue.StringExact("vstack")),
+					statecheck.ExpectKnownValue(dataSourceName, tfjsonpath.New("total"), knownvalue.NotNull()),
+					statecheck.ExpectKnownOutputValue("foreign_services", knownvalue.ListSizeExact(0)),
+				},
+			},
+		},
+	})
 }
