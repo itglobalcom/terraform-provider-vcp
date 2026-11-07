@@ -41,6 +41,19 @@ func createConnection(t *testing.T, api *fakeAPI, plan connectionModel) (connect
 	return out, resp
 }
 
+// assertProjectFromServices checks that the project ID came from the list of
+// the project services and the project card was never read: the resource has
+// to work with a key that carries only the LLM permission.
+func assertProjectFromServices(t *testing.T, api *fakeAPI) {
+	t.Helper()
+	if got := api.countExact("GET /api/v1/project"); got != 0 {
+		t.Errorf("GET /project called %d times, want none", got)
+	}
+	if got := api.countExact("GET /api/v1/project/services"); got != 1 {
+		t.Errorf("GET /project/services called %d times, want once", got)
+	}
+}
+
 func TestConnectionCreate(t *testing.T) {
 	t.Run("not connected — connects with the planned names and awaits the task", func(t *testing.T) {
 		api := newFakeAPI(t)
@@ -59,6 +72,7 @@ func TestConnectionCreate(t *testing.T) {
 		if state.ID.ValueString() != "4242" {
 			t.Errorf("id = %v, want the project id 4242", state.ID)
 		}
+		assertProjectFromServices(t, api)
 		if state.State.ValueString() != string(entities.LLMConnectionStateConnected) {
 			t.Errorf("state = %v, want connected", state.State)
 		}
@@ -90,6 +104,7 @@ func TestConnectionCreate(t *testing.T) {
 		if state.ID.ValueString() != "4242" || state.State.ValueString() != "connected" {
 			t.Errorf("state = %+v, want project 4242, connected", state)
 		}
+		assertProjectFromServices(t, api)
 	})
 
 	t.Run("connecting — refused, nothing sent", func(t *testing.T) {
@@ -106,6 +121,22 @@ func TestConnectionCreate(t *testing.T) {
 		}
 		if got := api.mutations(); len(got) != 0 {
 			t.Errorf("the provider sent %v while the project is connecting", got)
+		}
+	})
+
+	t.Run("project services unreadable — refused, nothing sent", func(t *testing.T) {
+		api := newFakeAPI(t)
+		api.failOn("GET /project/services", 403, 1)
+
+		_, resp := createConnection(t, api, connectionPlan("default", "first"))
+		if !resp.Diagnostics.HasError() || resp.Diagnostics.Errors()[0].Summary() != "Error Reading Project" {
+			t.Fatalf("want Error Reading Project, got %v", resp.Diagnostics)
+		}
+		if !resp.State.Raw.IsNull() {
+			t.Error("a failed create left a state")
+		}
+		if got := api.mutations(); len(got) != 0 {
+			t.Errorf("the provider sent %v without a project", got)
 		}
 	})
 }
@@ -259,6 +290,21 @@ func TestConnectionImport(t *testing.T) {
 			if id.ValueString() != tc.id {
 				t.Errorf("imported id = %v, want %s", id, tc.id)
 			}
+			assertProjectFromServices(t, api)
 		})
 	}
+
+	t.Run("project services unreadable — refused", func(t *testing.T) {
+		api := newFakeAPI(t)
+		api.failOn("GET /project/services", 403, 1)
+		res := NewConnectionResource().(*connectionResource)
+		configure(t, res, api.client(t))
+		s := resourceSchema(t, res)
+
+		resp := resource.ImportStateResponse{State: emptyState(s)}
+		res.ImportState(context.Background(), resource.ImportStateRequest{ID: "4242"}, &resp)
+		if !resp.Diagnostics.HasError() || resp.Diagnostics.Errors()[0].Summary() != "Error Reading Project" {
+			t.Fatalf("want Error Reading Project, got %v", resp.Diagnostics)
+		}
+	})
 }

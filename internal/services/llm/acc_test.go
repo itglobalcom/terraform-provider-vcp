@@ -49,12 +49,12 @@ func preCheckLLM(t *testing.T) {
 
 	client := acctest.GetTestClient()
 	ctx := context.Background()
-	project, err := client.GetProject(ctx)
+	services, err := client.GetProjectServices(ctx)
 	if err != nil {
-		t.Fatalf("reading the project: %v", err)
+		t.Fatalf("reading the project services: %v", err)
 	}
-	if strconv.Itoa(project.ID) != projectID {
-		t.Fatalf("VCP_LLM_PROJECT_ID is %s, but the token belongs to project %d", projectID, project.ID)
+	if strconv.Itoa(services.ProjectID) != projectID {
+		t.Fatalf("VCP_LLM_PROJECT_ID is %s, but the token belongs to project %d", projectID, services.ProjectID)
 	}
 	connection, err := client.GetLLMConnection(ctx)
 	if err != nil {

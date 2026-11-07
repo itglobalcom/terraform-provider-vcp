@@ -169,6 +169,17 @@ func (a *fakeAPI) countCalls(substr string) int {
 	return n
 }
 
+// countExact returns how many recorded calls are exactly the given one.
+func (a *fakeAPI) countExact(call string) int {
+	n := 0
+	for _, c := range a.calls() {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
 // mutations returns the non-GET calls, in order.
 func (a *fakeAPI) mutations() []string {
 	var out []string
@@ -245,8 +256,15 @@ func (a *fakeAPI) route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	// The key of the fake carries only the LLM permission: the project card is
+	// out of its reach, the list of the project services is not.
 	case p == "project" && r.Method == http.MethodGet:
-		a.writeJSON(w, map[string]any{"project": map[string]any{"id": a.projectID, "state": "active"}})
+		a.fail(w, http.StatusForbidden, "the key has no permission to read the project")
+	case p == "project/services" && r.Method == http.MethodGet:
+		a.writeJSON(w, map[string]any{"project_id": a.projectID, "services": []map[string]any{
+			{"service": "vstack", "state": "active"},
+			{"service": "llm", "state": "active"},
+		}})
 	case p == "llm/connection":
 		a.handleConnection(w, r, body)
 	case p == "llm/groups" && r.Method == http.MethodPost:
