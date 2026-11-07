@@ -5,6 +5,7 @@ subcategory: ""
 description: |-
   Connects the LLM service to the project. A project has one connection: connecting creates the first group (group_name) with its first access key (first_key_name), checks the funds and issues the service license. On a project that is already connected the resource takes the existing connection into the state without calling the API, and group_name and first_key_name are not applied.
   ~> The service cannot be disconnected: terraform destroy only removes the connection from the state, the project stays connected. The first group and key are not managed by this resource — import them as vcp_llm_group and vcp_llm_access_key to manage them.
+  The resource needs only the LLM permission of the project.
 ---
 
 # vcp_llm_connection (Resource)
@@ -12,6 +13,8 @@ description: |-
 Connects the LLM service to the project. A project has one connection: connecting creates the first group (`group_name`) with its first access key (`first_key_name`), checks the funds and issues the service license. On a project that is already connected the resource takes the existing connection into the state without calling the API, and `group_name` and `first_key_name` are not applied.
 
 ~> The service cannot be disconnected: `terraform destroy` only removes the connection from the state, the project stays connected. The first group and key are not managed by this resource — import them as `vcp_llm_group` and `vcp_llm_access_key` to manage them.
+
+The resource needs only the LLM permission of the project.
 
 ## Example Usage
 

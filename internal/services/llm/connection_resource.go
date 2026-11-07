@@ -55,7 +55,8 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"`first_key_name` are not applied.\n\n" +
 			"~> The service cannot be disconnected: `terraform destroy` only removes the connection from the " +
 			"state, the project stays connected. The first group and key are not managed by this resource — " +
-			"import them as `vcp_llm_group` and `vcp_llm_access_key` to manage them.",
+			"import them as `vcp_llm_group` and `vcp_llm_access_key` to manage them.\n\n" +
+			"The resource needs only the LLM permission of the project.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "ID of the project the connection belongs to.",
@@ -131,7 +132,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	project, err := r.client.GetProject(ctx)
+	projectID, err := r.projectID(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Reading Project", fmt.Sprintf("Could not read the project: %s", err))
 		return
@@ -170,7 +171,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		}
 	}
 
-	plan.ID = types.StringValue(strconv.Itoa(project.ID))
+	plan.ID = types.StringValue(projectID)
 	plan.State = types.StringValue(string(connection.State))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -229,13 +230,12 @@ func (r *connectionResource) Delete(_ context.Context, _ resource.DeleteRequest,
 
 // ImportState takes the project ID — the one the API key belongs to.
 func (r *connectionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	project, err := r.client.GetProject(ctx)
+	id, err := r.projectID(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Reading Project", fmt.Sprintf("Could not read the project: %s", err))
 		return
 	}
 
-	id := strconv.Itoa(project.ID)
 	if req.ID != id {
 		resp.Diagnostics.AddError("Invalid Import ID",
 			fmt.Sprintf("Expected the ID of the project the provider key belongs to, %s, got: %s.", id, req.ID))
@@ -243,4 +243,14 @@ func (r *connectionResource) ImportState(ctx context.Context, req resource.Impor
 	}
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+}
+
+// projectID reads the ID of the project the API key belongs to from the list
+// of the project services.
+func (r *connectionResource) projectID(ctx context.Context) (string, error) {
+	services, err := r.client.GetProjectServices(ctx)
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(services.ProjectID), nil
 }
