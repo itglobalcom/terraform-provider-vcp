@@ -21,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
+	"github.com/itglobalcom/terraform-provider-vcp/internal/locks"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
 	"github.com/itglobalcom/vstack-cloud-panel-sdk/entities"
 )
@@ -129,6 +130,7 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 	id := *group.ID
+	defer locks.LLMGroup(int(id))()
 
 	// From here on the group exists: a failure below still records it, so the
 	// next apply replaces it instead of creating a second one.
@@ -178,6 +180,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	id := entities.LLMGroupID(state.ID.ValueInt64())
+	defer locks.LLMGroup(int(id))()
 
 	if !plan.ModelIDs.Equal(state.ModelIDs) {
 		modelIDs := setModelIDs(ctx, plan.ModelIDs, &resp.Diagnostics)
@@ -212,6 +215,8 @@ func (r *groupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	id := entities.LLMGroupID(state.ID.ValueInt64())
+	defer locks.LLMGroup(int(id))()
+
 	group, err := r.client.GetLLMGroup(ctx, id)
 	if err != nil {
 		if sdk.IsNotFound(err) {

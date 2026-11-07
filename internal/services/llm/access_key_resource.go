@@ -21,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/itglobalcom/terraform-provider-vcp/internal/locks"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
 	"github.com/itglobalcom/vstack-cloud-panel-sdk/entities"
 )
@@ -157,6 +158,8 @@ func (r *accessKeyResource) Create(ctx context.Context, req resource.CreateReque
 	}
 
 	groupID := entities.LLMGroupID(plan.GroupID.ValueInt64())
+	defer locks.LLMGroup(int(groupID))()
+
 	key, err := r.client.IssueLLMAccessKeyAndWait(ctx, groupID, &entities.IssueLLMAccessKeyRequest{Name: plan.Name.ValueString()})
 	if err != nil {
 		resp.Diagnostics.AddError("Error Issuing LLM Access Key",
@@ -235,6 +238,7 @@ func (r *accessKeyResource) Update(ctx context.Context, req resource.UpdateReque
 
 	groupID := entities.LLMGroupID(state.GroupID.ValueInt64())
 	id := entities.LLMAccessKeyID(state.ID.ValueInt64())
+	defer locks.LLMGroup(int(groupID))()
 
 	if !plan.Tags.Equal(state.Tags) {
 		tags := setStrings(ctx, plan.Tags, &resp.Diagnostics)
@@ -282,6 +286,8 @@ func (r *accessKeyResource) Delete(ctx context.Context, req resource.DeleteReque
 
 	groupID := entities.LLMGroupID(state.GroupID.ValueInt64())
 	id := entities.LLMAccessKeyID(state.ID.ValueInt64())
+	defer locks.LLMGroup(int(groupID))()
+
 	if err := r.client.DeleteLLMAccessKeyAndWait(ctx, groupID, id); err != nil {
 		if sdk.IsNotFound(err) {
 			return
