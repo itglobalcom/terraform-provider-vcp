@@ -103,6 +103,19 @@ func TestAccessKeyCreateWithoutSecret(t *testing.T) {
 	}
 }
 
+func TestAccessKeyCreateWithoutTags(t *testing.T) {
+	api := newFakeAPI(t)
+	api.addGroup(10, "team", entities.LLMGroupStateActive)
+
+	_, resp := createKey(t, api, keyPlan(10, "ci"))
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Create failed: %v", resp.Diagnostics)
+	}
+	if got := api.countCalls("PUT /api/v1/llm/groups/10/access-keys/701/tags"); got != 0 {
+		t.Errorf("the Create set tags %d times, want none for an empty set: %v", got, api.calls())
+	}
+}
+
 // Tags set after the issue fail the apply, but the issued key and its secret
 // stay in state: a key outside the state would never be destroyed.
 func TestAccessKeyCreateTagsRefused(t *testing.T) {

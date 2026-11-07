@@ -78,6 +78,30 @@ func TestGroupCreate(t *testing.T) {
 	}
 }
 
+func TestGroupCreateWithoutModelsAndTags(t *testing.T) {
+	api := newFakeAPI(t)
+	res := NewGroupResource()
+	configure(t, res, api.client(t))
+	s := resourceSchema(t, res)
+
+	plan := groupModel{
+		ID: types.Int64Null(), Name: types.StringValue("team"),
+		ModelIDs: int64Set(), Tags: stringSet(nil), State: types.StringNull(),
+	}
+	resp := resource.CreateResponse{State: emptyState(s)}
+	res.Create(context.Background(), resource.CreateRequest{Plan: planForCreate(t, s, plan)}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Create failed: %v", resp.Diagnostics)
+	}
+
+	if got := api.countCalls("PUT /api/v1/llm/groups/701/models"); got != 0 {
+		t.Errorf("the Create set models %d times, want none for an empty set: %v", got, api.calls())
+	}
+	if got := api.countCalls("PUT /api/v1/llm/groups/701/tags"); got != 0 {
+		t.Errorf("the Create set tags %d times, want none for an empty set: %v", got, api.calls())
+	}
+}
+
 // Granting one model and revoking another is one replacement of the whole set:
 // a per-model call would leave the group half-changed when the second fails.
 func TestGroupUpdateSetsModelsInOneOperation(t *testing.T) {
