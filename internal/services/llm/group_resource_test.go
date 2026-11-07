@@ -2,11 +2,13 @@ package llm
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -184,6 +186,65 @@ func TestGroupDelete(t *testing.T) {
 			}
 			if api.groups[701].state != entities.LLMGroupStateDisabled {
 				t.Errorf("the API holds the group %s, want disabled", api.groups[701].state)
+			}
+		})
+	}
+}
+
+// Tags go after the models: a refused tag set fails the apply with the group
+// still in state.
+func TestGroupUpdateTagsRefused(t *testing.T) {
+	api := newFakeAPI(t)
+	api.addGroup(701, "team", entities.LLMGroupStateActive, 3)
+	api.failOn("PUT /tags", http.StatusBadRequest, 1)
+	res := NewGroupResource()
+	configure(t, res, api.client(t))
+	s := resourceSchema(t, res)
+
+	prior := groupAt(701, "team", int64Set(3), stringSet(nil))
+	plan := groupAt(701, "team", int64Set(3), stringSet([]string{"prod"}))
+	resp := resource.UpdateResponse{State: emptyState(s)}
+	res.Update(context.Background(), resource.UpdateRequest{
+		Plan: planOf(t, s, plan), State: stateOf(t, s, prior),
+	}, &resp)
+	if !resp.Diagnostics.HasError() {
+		t.Fatalf("Update passed with the tags refused: %v", resp.Diagnostics)
+	}
+	var state groupModel
+	readModel(t, resp.State, &state)
+	if state.ID.ValueInt64() != 701 {
+		t.Errorf("state holds group %v, want 701 kept", state.ID)
+	}
+}
+
+func TestGroupImport(t *testing.T) {
+	cases := map[string]struct {
+		id      string
+		want    int64
+		wantErr bool
+	}{
+		"numeric":     {id: "701", want: 701},
+		"not numeric": {id: "team", wantErr: true},
+		"zero":        {id: "0", wantErr: true},
+		"negative":    {id: "-1", wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			res := NewGroupResource().(*groupResource)
+			s := resourceSchema(t, res)
+			resp := resource.ImportStateResponse{State: emptyState(s)}
+			res.ImportState(context.Background(), resource.ImportStateRequest{ID: tc.id}, &resp)
+
+			if resp.Diagnostics.HasError() != tc.wantErr {
+				t.Fatalf("import of %q: %v, want error %v", tc.id, resp.Diagnostics, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			var id types.Int64
+			resp.State.GetAttribute(context.Background(), path.Root("id"), &id)
+			if id.ValueInt64() != tc.want {
+				t.Errorf("imported %v, want %d", id, tc.want)
 			}
 		})
 	}

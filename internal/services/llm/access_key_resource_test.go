@@ -103,6 +103,24 @@ func TestAccessKeyCreateWithoutSecret(t *testing.T) {
 	}
 }
 
+// Tags set after the issue fail the apply, but the issued key and its secret
+// stay in state: a key outside the state would never be destroyed.
+func TestAccessKeyCreateTagsRefused(t *testing.T) {
+	api := newFakeAPI(t)
+	api.addGroup(10, "team", entities.LLMGroupStateActive)
+	api.failOn("PUT /tags", http.StatusBadRequest, 1)
+
+	plan := keyPlan(10, "ci")
+	plan.Tags = stringSet([]string{"prod"})
+	state, resp := createKey(t, api, plan)
+	if !resp.Diagnostics.HasError() {
+		t.Fatalf("Create passed with the tags refused: %v", resp.Diagnostics)
+	}
+	if state.ID.ValueInt64() != 701 || state.Secret.ValueString() != "sk-701" {
+		t.Errorf("state holds key %v with secret %v, want the issued 701 with its secret", state.ID, state.Secret)
+	}
+}
+
 func TestAccessKeyImport(t *testing.T) {
 	cases := map[string]struct {
 		id         string
@@ -113,6 +131,7 @@ func TestAccessKeyImport(t *testing.T) {
 		"key only":      {id: "701", wantErr: true},
 		"not numeric":   {id: "team/ci", wantErr: true},
 		"zero group":    {id: "0/701", wantErr: true},
+		"zero key":      {id: "10/0", wantErr: true},
 		"trailing part": {id: "10/701/x", wantErr: true},
 	}
 	for name, tc := range cases {
@@ -298,5 +317,49 @@ func TestAccessKeyRead(t *testing.T) {
 		if !state.Locked.ValueBool() || state.LockReason.ValueString() != reason {
 			t.Errorf("locked=%v reason=%v, want the client lock out of band", state.Locked, state.LockReason)
 		}
+		if state.State.ValueString() != "active" {
+			t.Errorf("state = %v, want active as the API reports it", state.State)
+		}
 	})
+}
+
+func TestAccessKeyDelete(t *testing.T) {
+	cases := map[string]struct {
+		known   bool
+		refuse  int
+		wantErr bool
+	}{
+		"deleted":      {known: true},
+		"refused":      {known: true, refuse: http.StatusBadRequest, wantErr: true},
+		"already gone": {known: false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.addGroup(10, "team", entities.LLMGroupStateActive)
+			if tc.known {
+				api.addKey(701, 10, "ci", &entities.LLMAccessKeyLocks{})
+			}
+			if tc.refuse != 0 {
+				api.failOn("DELETE /access-keys/701", tc.refuse, 1)
+			}
+			res := NewAccessKeyResource()
+			configure(t, res, api.client(t))
+			s := resourceSchema(t, res)
+
+			state := stateOf(t, s, keyAt(10, 701, false, types.StringNull()))
+			resp := resource.DeleteResponse{State: state}
+			res.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
+
+			if resp.Diagnostics.HasError() != tc.wantErr {
+				t.Fatalf("Delete: %v, want error %v", resp.Diagnostics, tc.wantErr)
+			}
+			if got := api.countCalls("DELETE /api/v1/llm/groups/10/access-keys/701"); got != 1 {
+				t.Errorf("made %d delete calls, want 1: %v", got, api.calls())
+			}
+			if tc.known && !tc.wantErr && api.keys[701].state != entities.LLMAccessKeyStateRemoved {
+				t.Errorf("the API holds the key %s, want removed", api.keys[701].state)
+			}
+		})
+	}
 }
