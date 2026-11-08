@@ -216,6 +216,7 @@ type packagePlansModel struct {
 
 type packagePlanModel struct {
 	ID              types.Int64          `tfsdk:"id"`
+	Source          types.String         `tfsdk:"source"`
 	TechTitle       types.String         `tfsdk:"tech_title"`
 	Description     types.String         `tfsdk:"description"`
 	VolumeCredits   types.Float64        `tfsdk:"volume_credits"`
@@ -242,6 +243,7 @@ func packagePlansStateFrom(plans []entities.LLMPackagePlan) *packagePlansModel {
 		}
 		plan := packagePlanModel{
 			ID:              types.Int64Value(int64(p.ID)),
+			Source:          types.StringValue(string(p.Source)),
 			TechTitle:       types.StringValue(p.TechTitle),
 			Description:     description,
 			VolumeCredits:   types.Float64Value(p.VolumeCredits),
@@ -279,7 +281,16 @@ func (d *packagePlansDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Computed:            true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"id":               schema.Int64Attribute{MarkdownDescription: "Plan ID.", Computed: true},
+						"id": schema.Int64Attribute{
+							MarkdownDescription: "Package number within its `source`; unique only together with `source`: a package " +
+								"of the partner tariff and an individual package of the project may share it.",
+							Computed: true,
+						},
+						"source": schema.StringAttribute{
+							MarkdownDescription: "Where the package comes from: `catalog` — a package of the partner tariff, " +
+								"`individual` — an individual package of the project.",
+							Computed: true,
+						},
 						"tech_title":       schema.StringAttribute{MarkdownDescription: "Plan name.", Computed: true},
 						"description":      schema.StringAttribute{MarkdownDescription: "Plan description, in English.", Computed: true},
 						"volume_credits":   schema.Float64Attribute{MarkdownDescription: "Credits of a month.", Computed: true},

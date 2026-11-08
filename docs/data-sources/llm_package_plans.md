@@ -42,8 +42,9 @@ Read-Only:
 - `current_month` (Attributes) Terms for the rest of the current month, when bought now. (see [below for nested schema](#nestedatt--plans--current_month))
 - `description` (String) Plan description, in English.
 - `discount_percent` (Number) Discount of the plan, percent; null when the plan has no price.
-- `id` (Number) Plan ID.
+- `id` (Number) Package number within its `source`; unique only together with `source`: a package of the partner tariff and an individual package of the project may share it.
 - `price` (Number) Price of a month; null when usage is in credits only.
+- `source` (String) Where the package comes from: `catalog` — a package of the partner tariff, `individual` — an individual package of the project.
 - `tax_label` (String) Tax caption of the prices: `nds_excluded` or `vat_excluded`; null when usage is in credits only.
 - `tech_title` (String) Plan name.
 - `volume_credits` (Number) Credits of a month.
