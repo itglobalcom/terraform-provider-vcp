@@ -37,7 +37,7 @@ output "llm_model_prices" {
 
 - `context_size` (Number) Context size, in tokens.
 - `contour` (String) `local` for a model served in the local contour, `external` for an external provider.
-- `credit_price` (Attributes) Price of one credit for the project. (see [below for nested schema](#nestedatt--credit_price))
+- `credit_price` (Attributes) Price of one credit for the project; null when usage is in credits only. (see [below for nested schema](#nestedatt--credit_price))
 - `default_provider` (String) Slug of the provider the calls go to by default.
 - `description` (String) Description, in English.
 - `endpoint` (String) Inference address of the model.
@@ -73,7 +73,7 @@ Read-Only:
 Read-Only:
 
 - `credits` (Number) Price in credits.
-- `money` (Number) Price in the currency of `credit_price`, where priced.
+- `money` (Number) Price in the currency of `credit_price`; null when usage is in credits only or the model is not priced.
 - `unit` (String) Unit the price is quoted for, e.g. `input_tokens`, `output_tokens`, `request`, `audio_minute`. New units may be added over time.
 - `variant` (String) Price variant, where the model has several.
 
@@ -102,6 +102,6 @@ Read-Only:
 Read-Only:
 
 - `credits` (Number) Price in credits.
-- `money` (Number) Price in the currency of `credit_price`, where priced.
+- `money` (Number) Price in the currency of `credit_price`; null when usage is in credits only or the model is not priced.
 - `unit` (String) Unit the price is quoted for, e.g. `input_tokens`, `output_tokens`, `request`, `audio_minute`. New units may be added over time.
 - `variant` (String) Price variant, where the model has several.

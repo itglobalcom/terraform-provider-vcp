@@ -54,7 +54,7 @@ output "api_key_secret" {
 
 - `id` (Number) Access key ID.
 - `secret` (String, Sensitive) Secret of the key, for the `Authorization` header of the inference calls. Set when the key is issued; empty for an imported key.
-- `state` (String) Key state: `active`, `revoking`, `revoked` or `removing`. A key of a disabled group is revoked. New states may be added over time.
+- `state` (String) Key state: `active`, `revoking`, `revoked`, `removing` or `suspended_by_project_quota`, in place of `active` while the LLM quota of the project is used up. A key of a disabled group is revoked. New states may be added over time.
 
 ## Import
 

@@ -46,7 +46,7 @@ resource "vcp_llm_group" "backend" {
 ### Read-Only
 
 - `id` (Number) Group ID.
-- `state` (String) Group state: `active` or `disabled`. New states may be added over time.
+- `state` (String) Group state: `active`, `disabled` or `suspended_by_project_quota`, in place of `active` while the LLM quota of the project is used up. New states may be added over time.
 
 ## Import
 
