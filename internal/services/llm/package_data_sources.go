@@ -16,7 +16,7 @@ var (
 	_ datasource.DataSourceWithConfigure = &packagePlansDataSource{}
 )
 
-const taxLabelDescription = "Tax caption of the prices: `nds_excluded` or `vat_excluded`."
+const taxLabelDescription = "Tax caption of the prices: `nds_excluded` or `vat_excluded`; null when usage is in credits only."
 
 // ----------------------------------------------------------------------
 // vcp_llm_package
@@ -83,7 +83,7 @@ func currentPackageStateFrom(p *entities.LLMCurrentPackage) *currentPackageModel
 			OverPackageCredits:   types.Float64Value(p.Usage.OverPackageCredits),
 		},
 		PricePerCredit:         optFloat(p.PricePerCredit),
-		Currency:               types.StringValue(p.Currency),
+		Currency:               optNonEmptyString(p.Currency),
 		TaxLabel:               optTaxLabel(p.TaxLabel),
 		PackagesDisabled:       types.BoolValue(p.PackagesDisabled),
 		ExhaustedPackageMode:   types.StringValue(string(p.ExhaustedPackageMode)),
@@ -94,8 +94,8 @@ func currentPackageStateFrom(p *entities.LLMCurrentPackage) *currentPackageModel
 			ID:                     types.Int64Value(int64(pkg.ID)),
 			TechTitle:              types.StringValue(pkg.TechTitle),
 			VolumeCredits:          types.Float64Value(pkg.VolumeCredits),
-			DiscountPercent:        types.Float64Value(pkg.DiscountPercent),
-			Price:                  types.Float64Value(pkg.Price),
+			DiscountPercent:        optFloat(pkg.DiscountPercent),
+			Price:                  optFloat(pkg.Price),
 			FullMonthVolumeCredits: optFloat(pkg.FullMonthVolumeCredits),
 			FullMonthPrice:         optFloat(pkg.FullMonthPrice),
 			PeriodFrom:             types.StringValue(pkg.PeriodFrom),
@@ -127,8 +127,10 @@ func (d *packageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 	}
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Reads the LLM credit package of the project: the current package, the spend of the " +
-			"open period, the price of a credit and the stop of the service by the package. Readable before " +
-			"the project is connected to the LLM service. Packages are bought in the panel.",
+			"open period, the price of a credit and the stop of the service. Readable before the project is " +
+			"connected to the LLM service. Packages are bought in the panel. A project whose usage is in " +
+			"credits only has no prices: `price_per_credit`, `currency`, `tax_label` and the prices of the " +
+			"package are null.",
 		Attributes: map[string]schema.Attribute{
 			"package": schema.SingleNestedAttribute{
 				MarkdownDescription: "Current package; null when the project has none.",
@@ -137,8 +139,8 @@ func (d *packageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 					"id":                        schema.Int64Attribute{MarkdownDescription: "Package ID.", Computed: true},
 					"tech_title":                computedString("Plan of the package, as `tech_title` of `vcp_llm_package_plans`."),
 					"volume_credits":            computedFloat("Credits of the package period."),
-					"discount_percent":          computedFloat("Discount of the plan, percent."),
-					"price":                     computedFloat("Price of the package period."),
+					"discount_percent":          computedFloat("Discount of the plan, percent; null when the package has no price."),
+					"price":                     computedFloat("Price of the package period; null when usage is in credits only."),
 					"full_month_volume_credits": computedFloat("Credits of a full month, when the period is shorter."),
 					"full_month_price":          computedFloat("Price of a full month, when the period is shorter."),
 					"period_from":               computedString("First day of the package period, `YYYY-MM-DD`."),
@@ -159,18 +161,19 @@ func (d *packageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 					"over_package_credits":   computedFloat("Credits spent over the package."),
 				},
 			},
-			"price_per_credit":            computedFloat("Price of one credit for the project."),
-			"currency":                    computedString("Currency code of the prices, e.g. `RUB`."),
+			"price_per_credit":            computedFloat("Price of one credit for the project; null when usage is in credits only."),
+			"currency":                    computedString("Currency code of the prices, e.g. `RUB`; null when usage is in credits only."),
 			"tax_label":                   computedString(taxLabelDescription),
 			"packages_disabled":           schema.BoolAttribute{MarkdownDescription: "Whether packages are not offered to the project.", Computed: true},
-			"exhausted_package_mode":      computedString("What happens once the package is used up: `stop` or `continue_pay_as_you_go`."),
+			"exhausted_package_mode":      computedString("What happens once the current package is used up: `stop` or `continue_pay_as_you_go`; `continue_pay_as_you_go` when there is no package."),
 			"pay_as_you_go_limit_credits": computedFloat("Credits the project may spend over the package, in the `continue_pay_as_you_go` mode."),
 			"stop": schema.SingleNestedAttribute{
-				MarkdownDescription: "Stop of the service by the package; null when the service is not stopped.",
-				Computed:            true,
+				MarkdownDescription: "Stop of the service by the package, the pay-as-you-go limit or the project quota; null when " +
+					"the service is not stopped.",
+				Computed: true,
 				Attributes: map[string]schema.Attribute{
 					"stopped_at": computedString("When the service was stopped, RFC 3339."),
-					"reason":     computedString("Why: `package_exhausted` or `pay_as_you_go_limit_exhausted`."),
+					"reason":     computedString("Why: `package_exhausted`, `pay_as_you_go_limit_exhausted` or `project_quota_exhausted`. New reasons may be added over time."),
 					"state":      computedString("Stop state: `stopped`, `starting` or `started`."),
 				},
 			},
@@ -242,9 +245,9 @@ func packagePlansStateFrom(plans []entities.LLMPackagePlan) *packagePlansModel {
 			TechTitle:       types.StringValue(p.TechTitle),
 			Description:     description,
 			VolumeCredits:   types.Float64Value(p.VolumeCredits),
-			DiscountPercent: types.Float64Value(p.DiscountPercent),
-			Price:           types.Float64Value(p.Price),
-			Currency:        types.StringValue(p.Currency),
+			DiscountPercent: optFloat(p.DiscountPercent),
+			Price:           optFloat(p.Price),
+			Currency:        optString(p.Currency),
 			TaxLabel:        optTaxLabel(p.TaxLabel),
 		}
 		if m := p.CurrentMonth; m != nil {
@@ -252,7 +255,7 @@ func packagePlansStateFrom(plans []entities.LLMPackagePlan) *packagePlansModel {
 				PeriodFrom:    types.StringValue(m.PeriodFrom),
 				PeriodTo:      types.StringValue(m.PeriodTo),
 				VolumeCredits: types.Float64Value(m.VolumeCredits),
-				Price:         types.Float64Value(m.Price),
+				Price:         optFloat(m.Price),
 			}
 		}
 		out.Plans[i] = plan
@@ -266,8 +269,10 @@ func (d *packagePlansDataSource) Metadata(_ context.Context, req datasource.Meta
 
 func (d *packagePlansDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Lists the LLM credit package plans available to the project. Readable before the " +
-			"project is connected to the LLM service.",
+		MarkdownDescription: "Lists the LLM credit packages available to the project: the packages of the partner tariff " +
+			"and the individual packages of the project. Readable before the project is connected to the LLM " +
+			"service. A project whose usage is in credits only has no prices: `price`, `discount_percent`, " +
+			"`currency` and `tax_label` are null.",
 		Attributes: map[string]schema.Attribute{
 			"plans": schema.ListNestedAttribute{
 				MarkdownDescription: "Package plans.",
@@ -278,9 +283,9 @@ func (d *packagePlansDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 						"tech_title":       schema.StringAttribute{MarkdownDescription: "Plan name.", Computed: true},
 						"description":      schema.StringAttribute{MarkdownDescription: "Plan description, in English.", Computed: true},
 						"volume_credits":   schema.Float64Attribute{MarkdownDescription: "Credits of a month.", Computed: true},
-						"discount_percent": schema.Float64Attribute{MarkdownDescription: "Discount of the plan, percent.", Computed: true},
-						"price":            schema.Float64Attribute{MarkdownDescription: "Price of a month.", Computed: true},
-						"currency":         schema.StringAttribute{MarkdownDescription: "Currency code of the price, e.g. `RUB`.", Computed: true},
+						"discount_percent": schema.Float64Attribute{MarkdownDescription: "Discount of the plan, percent; null when the plan has no price.", Computed: true},
+						"price":            schema.Float64Attribute{MarkdownDescription: "Price of a month; null when usage is in credits only.", Computed: true},
+						"currency":         schema.StringAttribute{MarkdownDescription: "Currency code of the price, e.g. `RUB`; null when usage is in credits only.", Computed: true},
 						"tax_label":        schema.StringAttribute{MarkdownDescription: taxLabelDescription, Computed: true},
 						"current_month": schema.SingleNestedAttribute{
 							MarkdownDescription: "Terms for the rest of the current month, when bought now.",
@@ -289,7 +294,7 @@ func (d *packagePlansDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 								"period_from":    schema.StringAttribute{MarkdownDescription: "First day, `YYYY-MM-DD`.", Computed: true},
 								"period_to":      schema.StringAttribute{MarkdownDescription: "Last day, `YYYY-MM-DD`.", Computed: true},
 								"volume_credits": schema.Float64Attribute{MarkdownDescription: "Credits of the rest of the month.", Computed: true},
-								"price":          schema.Float64Attribute{MarkdownDescription: "Price of the rest of the month.", Computed: true},
+								"price":          schema.Float64Attribute{MarkdownDescription: "Price of the rest of the month; null when the plan has no price.", Computed: true},
 							},
 						},
 					},

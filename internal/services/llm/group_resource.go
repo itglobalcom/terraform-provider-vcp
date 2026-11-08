@@ -91,9 +91,10 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Default:     setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 			},
 			"state": schema.StringAttribute{
-				MarkdownDescription: "Group state: `active` or `disabled`. New states may be added over time.",
-				Computed:            true,
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				MarkdownDescription: "Group state: `active`, `disabled` or `suspended_by_project_quota`, in place " +
+					"of `active` while the LLM quota of the project is used up. New states may be added over time.",
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -225,7 +226,7 @@ func (r *groupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		resp.Diagnostics.AddError("Error Reading LLM Group", fmt.Sprintf("Could not read LLM group %d: %s", id, err))
 		return
 	}
-	if group.State != nil && *group.State != entities.LLMGroupStateActive {
+	if group.State != nil && (*group.State == entities.LLMGroupStateDisabled || *group.State == entities.LLMGroupStateDeleted) {
 		tflog.Info(ctx, "LLM group is already disabled, treating as destroyed", map[string]any{"id": int(id)})
 		return
 	}

@@ -306,7 +306,7 @@ func modelPriceAttributes() map[string]schema.Attribute {
 			Computed:            true,
 		},
 		"money": schema.Float64Attribute{
-			MarkdownDescription: "Price in the currency of `credit_price`, where priced.",
+			MarkdownDescription: "Price in the currency of `credit_price`; null when usage is in credits only or the model is not priced.",
 			Computed:            true,
 		},
 	}
@@ -370,7 +370,7 @@ func (d *modelDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 		MarkdownDescription: "Whether the model calls tools.",
 		Computed:            true,
 	}
-	attrs["credit_price"] = creditPriceAttribute("Price of one credit for the project.")
+	attrs["credit_price"] = creditPriceAttribute("Price of one credit for the project; null when usage is in credits only.")
 	attrs["prices"] = schema.ListNestedAttribute{
 		MarkdownDescription: "Prices of the model by unit and variant.",
 		Computed:            true,

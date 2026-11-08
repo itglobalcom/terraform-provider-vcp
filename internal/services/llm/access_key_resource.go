@@ -114,8 +114,9 @@ func (r *accessKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"state": schema.StringAttribute{
-				MarkdownDescription: "Key state: `active`, `revoking`, `revoked` or `removing`. A key of a " +
-					"disabled group is revoked. New states may be added over time.",
+				MarkdownDescription: "Key state: `active`, `revoking`, `revoked`, `removing` or `suspended_by_project_quota`, in " +
+					"place of `active` while the LLM quota of the project is used up. A key of a disabled group is " +
+					"revoked. New states may be added over time.",
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
