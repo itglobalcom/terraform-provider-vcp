@@ -19,3 +19,40 @@ resource "vcp_server" "example" {
 
   tags = ["managed-by-terraform"]
 }
+
+# A server ordered with an application from the catalog. Parameter names come
+# from the catalog entry; issue_llm_key is accepted only where the entry has
+# llm_key_enabled.
+data "vcp_applications" "kz" {
+  location_id = "kz"
+}
+
+resource "vcp_server" "with_app" {
+  name        = "assistant"
+  location_id = "kz"
+  image_id    = data.vcp_applications.kz.applications[0].images[0]
+  cpu         = 4
+  ram_mb      = 8192
+
+  volumes = [
+    {
+      number  = 0
+      name    = "boot"
+      size_mb = 51200
+    },
+  ]
+
+  applications = [
+    {
+      id            = data.vcp_applications.kz.applications[0].id
+      issue_llm_key = data.vcp_applications.kz.applications[0].llm_key_enabled
+      parameters = {
+        ADMIN_EMAIL = "admin@example.com"
+      }
+    },
+  ]
+}
+
+output "application_installations" {
+  value = vcp_server.with_app.application_installations
+}

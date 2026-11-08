@@ -15,6 +15,7 @@ type ServerResourceModel struct {
 	SSHKeyIDs       []types.Int64     `tfsdk:"ssh_key_ids"`
 	InitScript      types.String      `tfsdk:"init_script"`
 	ApplicationsIDs []types.String    `tfsdk:"applications_ids"`
+	Applications    types.List        `tfsdk:"applications"`
 	Tags            types.Set         `tfsdk:"tags"`
 	AffinityGroupID types.String      `tfsdk:"affinity_group_id"`
 	Volumes         []VolumeAttrModel `tfsdk:"volumes"`
@@ -25,6 +26,8 @@ type ServerResourceModel struct {
 	Created   types.String `tfsdk:"created"`
 	Login     types.String `tfsdk:"login"`
 	Password  types.String `tfsdk:"password"`
+
+	ApplicationInstallations types.List `tfsdk:"application_installations"`
 }
 
 // VolumeAttrModel represents a server volume
