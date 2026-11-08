@@ -402,7 +402,7 @@ data "vcp_llm_package_plans" "all" {}
 					statecheck.ExpectKnownValue("data.vcp_llm_model.first", tfjsonpath.New("is_available_to_groups"), knownvalue.Bool(true)),
 					statecheck.ExpectKnownValue("data.vcp_llm_model.first", tfjsonpath.New("endpoint"), knownvalue.NotNull()),
 					statecheck.ExpectKnownValue("data.vcp_llm_model.first", tfjsonpath.New("default_provider"), knownvalue.NotNull()),
-					statecheck.ExpectKnownValue("data.vcp_llm_package.current", tfjsonpath.New("currency"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue("data.vcp_llm_package.current", tfjsonpath.New("exhausted_package_mode"), knownvalue.NotNull()),
 					statecheck.ExpectKnownValue("data.vcp_llm_package.current", tfjsonpath.New("usage"), knownvalue.NotNull()),
 					statecheck.ExpectKnownValue("data.vcp_llm_package_plans.all", tfjsonpath.New("plans"), knownvalue.NotNull()),
 				},
