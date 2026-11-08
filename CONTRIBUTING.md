@@ -138,8 +138,15 @@ of the version pinned in `go.mod`.
   back in. This is the safety net against a permanent substitution.
 
 A patch that spans both repositories is fine — describe the SDK part in the issue, and note
-that the provider side needs the new SDK version. Releasing that version is a maintainer step:
+that the provider side needs the new SDK version. The SDK does not have to be released for that;
+its `staging` branch is mirrored too. Maintainer steps:
 
-1. In the SDK repository: `git tag vX.Y.Z && git push --tags`.
-2. In the provider: `go get github.com/itglobalcom/vstack-cloud-panel-sdk@vX.Y.Z && go mod tidy`.
-3. `make check-release` — make sure the provider builds against the published version.
+1. The SDK change is merged into the SDK `staging`. Tag that commit as a release candidate:
+   `git tag vX.Y.Z-rc.N && git push origin vX.Y.Z-rc.N` (or skip the tag and use the commit's
+   pseudo-version).
+2. In the provider's `staging`: `go get github.com/itglobalcom/vstack-cloud-panel-sdk@vX.Y.Z-rc.N && go mod tidy`,
+   then `make check-release`.
+3. Releasing: the SDK `staging` goes into `main` and gets the final tag `vX.Y.Z`; the provider then
+   pins it (`go get …@vX.Y.Z && go mod tidy`) and `make check-sdk-release check-release` passes
+   before the provider's `staging` goes into `main` and is tagged. CI refuses an rc tag or a
+   pseudo-version on `main` and in a release.

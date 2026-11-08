@@ -33,6 +33,8 @@ apply loses data) in a `~>` paragraph, which renders as a callout.
   is *committed* has to be a published version pinned in `go.mod` — `go.work` is a personal file and
   gitignored, a `go.mod` `replace` is never committed, and `make check-release` (a build without
   `go.work`) is what proves the pin resolves on its own.
+- **On `staging`, pin the SDK from its `staging`** — an rc tag `vX.Y.Z-rc.N` or the pseudo-version of
+  that commit; the final SDK tag `vX.Y.Z` is pinned when the provider is released.
 - **Acceptance tests are mandatory** — nothing is finished without them, and they cover the life of
   the resource, not one apply: create → empty plan straight after (a perpetual diff is the commonest
   defect and invisible without this step) → edit in place, asserting the object was *not* replaced →
