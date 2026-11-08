@@ -3,12 +3,12 @@
 page_title: "vcp_llm_package_plans Data Source - vcp"
 subcategory: ""
 description: |-
-  Lists the LLM credit package plans available to the project. Readable before the project is connected to the LLM service.
+  Lists the LLM credit packages available to the project: the packages of the partner tariff and the individual packages of the project. Readable before the project is connected to the LLM service. A project whose usage is in credits only has no prices: price, discount_percent, currency and tax_label are null.
 ---
 
 # vcp_llm_package_plans (Data Source)
 
-Lists the LLM credit package plans available to the project. Readable before the project is connected to the LLM service.
+Lists the LLM credit packages available to the project: the packages of the partner tariff and the individual packages of the project. Readable before the project is connected to the LLM service. A project whose usage is in credits only has no prices: `price`, `discount_percent`, `currency` and `tax_label` are null.
 
 ## Example Usage
 
@@ -17,7 +17,11 @@ data "vcp_llm_package_plans" "all" {}
 
 output "llm_package_plans" {
   value = {
-    for p in data.vcp_llm_package_plans.all.plans : p.tech_title => "${p.price} ${p.currency} for ${p.volume_credits} credits"
+    for p in data.vcp_llm_package_plans.all.plans : p.tech_title => (
+      p.price == null
+      ? "${p.volume_credits} credits"
+      : "${p.price} ${p.currency} for ${p.volume_credits} credits"
+    )
   }
 }
 ```
@@ -34,13 +38,14 @@ output "llm_package_plans" {
 
 Read-Only:
 
-- `currency` (String) Currency code of the price, e.g. `RUB`.
+- `currency` (String) Currency code of the price, e.g. `RUB`; null when usage is in credits only.
 - `current_month` (Attributes) Terms for the rest of the current month, when bought now. (see [below for nested schema](#nestedatt--plans--current_month))
 - `description` (String) Plan description, in English.
-- `discount_percent` (Number) Discount of the plan, percent.
-- `id` (Number) Plan ID.
-- `price` (Number) Price of a month.
-- `tax_label` (String) Tax caption of the prices: `nds_excluded` or `vat_excluded`.
+- `discount_percent` (Number) Discount of the plan, percent; null when the plan has no price.
+- `id` (Number) Package number within its `source`; unique only together with `source`: a package of the partner tariff and an individual package of the project may share it.
+- `price` (Number) Price of a month; null when usage is in credits only.
+- `source` (String) Where the package comes from: `catalog` — a package of the partner tariff, `individual` — an individual package of the project.
+- `tax_label` (String) Tax caption of the prices: `nds_excluded` or `vat_excluded`; null when usage is in credits only.
 - `tech_title` (String) Plan name.
 - `volume_credits` (Number) Credits of a month.
 
@@ -51,5 +56,5 @@ Read-Only:
 
 - `period_from` (String) First day, `YYYY-MM-DD`.
 - `period_to` (String) Last day, `YYYY-MM-DD`.
-- `price` (Number) Price of the rest of the month.
+- `price` (Number) Price of the rest of the month; null when the plan has no price.
 - `volume_credits` (Number) Credits of the rest of the month.

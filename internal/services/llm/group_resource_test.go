@@ -158,6 +158,26 @@ func TestGroupRead(t *testing.T) {
 		}
 	})
 
+	t.Run("suspended by the project quota — stays with that state", func(t *testing.T) {
+		api := newFakeAPI(t)
+		api.addGroup(701, "team", entities.LLMGroupStateSuspendedByProjectQuota, 3)
+		res := NewGroupResource()
+		configure(t, res, api.client(t))
+		s := resourceSchema(t, res)
+
+		prior := stateOf(t, s, groupAt(701, "team", int64Set(3), stringSet(nil)))
+		resp := resource.ReadResponse{State: prior}
+		res.Read(context.Background(), resource.ReadRequest{State: prior}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Read failed: %v", resp.Diagnostics)
+		}
+		var state groupModel
+		readModel(t, resp.State, &state)
+		if state.State.ValueString() != "suspended_by_project_quota" {
+			t.Errorf("state = %v, want suspended_by_project_quota as the API reports it", state.State)
+		}
+	})
+
 	t.Run("gone — removed from state", func(t *testing.T) {
 		api := newFakeAPI(t)
 		res := NewGroupResource()
@@ -177,14 +197,17 @@ func TestGroupRead(t *testing.T) {
 }
 
 // Disabling cannot be undone and the API refuses it twice: a destroy of a group
-// already disabled must not call it.
+// already disabled must not call it. A group suspended by the project quota is
+// still live and is disabled like an active one.
 func TestGroupDelete(t *testing.T) {
 	cases := map[string]struct {
 		state    entities.LLMGroupState
 		wantCall bool
 	}{
-		"active":   {entities.LLMGroupStateActive, true},
-		"disabled": {entities.LLMGroupStateDisabled, false},
+		"active":                     {entities.LLMGroupStateActive, true},
+		"suspended_by_project_quota": {entities.LLMGroupStateSuspendedByProjectQuota, true},
+		"disabled":                   {entities.LLMGroupStateDisabled, false},
+		"deleted":                    {entities.LLMGroupStateDeleted, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -208,7 +231,7 @@ func TestGroupDelete(t *testing.T) {
 			if !tc.wantCall && got != 0 {
 				t.Errorf("disabled an already disabled group (%d calls)", got)
 			}
-			if api.groups[701].state != entities.LLMGroupStateDisabled {
+			if tc.wantCall && api.groups[701].state != entities.LLMGroupStateDisabled {
 				t.Errorf("the API holds the group %s, want disabled", api.groups[701].state)
 			}
 		})

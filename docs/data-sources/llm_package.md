@@ -3,12 +3,12 @@
 page_title: "vcp_llm_package Data Source - vcp"
 subcategory: ""
 description: |-
-  Reads the LLM credit package of the project: the current package, the spend of the open period, the price of a credit and the stop of the service by the package. Readable before the project is connected to the LLM service. Packages are bought in the panel.
+  Reads the LLM credit package of the project: the current package, the spend of the open period, the price of a credit and the stop of the service. Readable before the project is connected to the LLM service. Packages are bought in the panel. A project whose usage is in credits only has no prices: price_per_credit, currency, tax_label and the prices of the package are null.
 ---
 
 # vcp_llm_package (Data Source)
 
-Reads the LLM credit package of the project: the current package, the spend of the open period, the price of a credit and the stop of the service by the package. Readable before the project is connected to the LLM service. Packages are bought in the panel.
+Reads the LLM credit package of the project: the current package, the spend of the open period, the price of a credit and the stop of the service. Readable before the project is connected to the LLM service. Packages are bought in the panel. A project whose usage is in credits only has no prices: `price_per_credit`, `currency`, `tax_label` and the prices of the package are null.
 
 ## Example Usage
 
@@ -29,14 +29,14 @@ output "llm_credits_left" {
 
 ### Read-Only
 
-- `currency` (String) Currency code of the prices, e.g. `RUB`.
-- `exhausted_package_mode` (String) What happens once the package is used up: `stop` or `continue_pay_as_you_go`.
+- `currency` (String) Currency code of the prices, e.g. `RUB`; null when usage is in credits only.
+- `exhausted_package_mode` (String) What happens once the current package is used up: `stop` or `continue_pay_as_you_go`; `continue_pay_as_you_go` when there is no package.
 - `package` (Attributes) Current package; null when the project has none. (see [below for nested schema](#nestedatt--package))
 - `packages_disabled` (Boolean) Whether packages are not offered to the project.
 - `pay_as_you_go_limit_credits` (Number) Credits the project may spend over the package, in the `continue_pay_as_you_go` mode.
-- `price_per_credit` (Number) Price of one credit for the project.
-- `stop` (Attributes) Stop of the service by the package; null when the service is not stopped. (see [below for nested schema](#nestedatt--stop))
-- `tax_label` (String) Tax caption of the prices: `nds_excluded` or `vat_excluded`.
+- `price_per_credit` (Number) Price of one credit for the project; null when usage is in credits only.
+- `stop` (Attributes) Stop of the service by the package, the pay-as-you-go limit or the project quota; null when the service is not stopped. (see [below for nested schema](#nestedatt--stop))
+- `tax_label` (String) Tax caption of the prices: `nds_excluded` or `vat_excluded`; null when usage is in credits only.
 - `usage` (Attributes) Spend of the open period. (see [below for nested schema](#nestedatt--usage))
 
 <a id="nestedatt--package"></a>
@@ -45,13 +45,13 @@ output "llm_credits_left" {
 Read-Only:
 
 - `auto_renew` (Boolean) Whether the package renews for the next month.
-- `discount_percent` (Number) Discount of the plan, percent.
+- `discount_percent` (Number) Discount of the plan, percent; null when the package has no price.
 - `full_month_price` (Number) Price of a full month, when the period is shorter.
 - `full_month_volume_credits` (Number) Credits of a full month, when the period is shorter.
 - `id` (Number) Package ID.
 - `period_from` (String) First day of the package period, `YYYY-MM-DD`.
 - `period_to` (String) Last day of the package period, `YYYY-MM-DD`.
-- `price` (Number) Price of the package period.
+- `price` (Number) Price of the package period; null when usage is in credits only.
 - `state` (String) Package state: `scheduled`, `active`, `finished`, `replaced` or `cancelled`.
 - `tech_title` (String) Plan of the package, as `tech_title` of `vcp_llm_package_plans`.
 - `volume_credits` (Number) Credits of the package period.
@@ -62,7 +62,7 @@ Read-Only:
 
 Read-Only:
 
-- `reason` (String) Why: `package_exhausted` or `pay_as_you_go_limit_exhausted`.
+- `reason` (String) Why: `package_exhausted`, `pay_as_you_go_limit_exhausted` or `project_quota_exhausted`. New reasons may be added over time.
 - `state` (String) Stop state: `stopped`, `starting` or `started`.
 - `stopped_at` (String) When the service was stopped, RFC 3339.
 

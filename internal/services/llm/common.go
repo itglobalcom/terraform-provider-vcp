@@ -95,6 +95,14 @@ func optString(v *string) types.String {
 	return types.StringValue(*v)
 }
 
+// optNonEmptyString reads a string the API leaves out when it has no value.
+func optNonEmptyString(v string) types.String {
+	if v == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(v)
+}
+
 func optFloat(v *float64) types.Float64 {
 	if v == nil {
 		return types.Float64Null()

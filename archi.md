@@ -64,7 +64,7 @@ id, `VmwareTaskID`) и LLM (`vcp_llm_*`, целочисленные id, `TaskID`
 
 | Contract | Type | Direction | Owner | Compatibility |
 | --- | --- | --- | --- | --- |
-| `public-api` — REST монолита, потребляется через Go SDK `vstack-cloud-panel-sdk` | API | in | — | consumer: провайдер своего контракта не определяет и следует за publisher'ом; версия SDK пиннится в `go.mod` опубликованным тегом |
+| `public-api` — REST монолита, потребляется через Go SDK `vstack-cloud-panel-sdk` | API | in | — | consumer: провайдер своего контракта не определяет и следует за publisher'ом; версия SDK пиннится в `go.mod`: на `staging` — rc-тегом или псевдоверсией коммита `staging` SDK, на `main` и в релизе — финальным тегом `vX.Y.Z` |
 | поверхность провайдера `vcp` — имена ресурсов и data sources, их атрибуты и семантика | Terraform provider schema | out | ctx_terraform_provider_vcp | опубликованные имена и атрибуты не переименовываются и не меняют смысл: на них написаны конфигурации пользователей, а прежний state обязан читаться новой версией. Расширение — только добавлением |
 | релиз провайдера в Terraform Registry (`itglobalcom/vcp`, protocol 6.0) | пакет | out | ctx_terraform_provider_vcp | публикуется goreleaser'ом по git-тегу `v*`, подписывается GPG; справочник `docs/` — часть релиза |
 
@@ -91,13 +91,15 @@ id, `VmwareTaskID`) и LLM (`vcp_llm_*`, целочисленные id, `TaskID`
   `make docs-generate` — после него `docs/` без диффа; `terraform fmt -check
   -recursive examples/` — `examples/` рендерится в `docs/`; `make check-release`
   (`GOWORK=off go build ./...`) — доказывает, что версия SDK в `go.mod`
-  опубликована и `replace` не просочился; `make validate-configs` — реальный
+  опубликована и `replace` не просочился; `make check-sdk-release` — SDK
+  в `go.mod` закреплён финальным тегом, на `main` и в релизе; `make validate-configs` — реальный
   `terraform validate` по примерам и acceptance-конфигурациям против собранного
   бинаря.
 - Pipeline: `.github/workflows/test.yml` гоняет те же гейты (сборка, `gofmt`,
   golangci-lint той же версии, `terraform fmt`, unit-тесты, отдельная job на
-  актуальность `docs/`); `.github/workflows/release.yml` — goreleaser по тегу
-  `v*`. Acceptance-тесты пайплайн не запускает: им нужны живые `VCP_*` и они
+  актуальность `docs/`, `make check-sdk-release` на `main`);
+  `.github/workflows/release.yml` — `make check-sdk-release` и goreleaser
+  по тегу `v*`. Acceptance-тесты пайплайн не запускает: им нужны живые `VCP_*` и они
   создают тарифицируемые ресурсы (см. Known legacy deviations).
 - Done: гейты зелёные; новый ресурс или data source зарегистрирован
   в `internal/provider/provider.go`; у него есть пример в `examples/`
@@ -122,8 +124,9 @@ id, `VmwareTaskID`) и LLM (`vcp_llm_*`, целочисленные id, `TaskID`
 - Policy: новый ресурс или data source регистрируется в `internal/provider/provider.go`
   и получает пример в `examples/`; имена и семантика опубликованных атрибутов
   не меняются; `docs/` обновляется генератором, а не руками; недостающее
-  в клиенте API добавляется в SDK и пиннится опубликованной версией
-  в `go.mod`; поле, которое API принимает и игнорирует, не заводится.
+  в клиенте API добавляется в SDK и пиннится в `go.mod` — на `staging`
+  rc-тегом или псевдоверсией `staging` SDK, на `main` и в релизе финальным
+  тегом; поле, которое API принимает и игнорирует, не заводится.
 - Required reviews: владелец контекста; интеграции — при добавлении раздела
   контракта `public-api` в провайдер и при смене версии SDK.
 - Escalation triggers: переименование или смена смысла опубликованного ресурса,

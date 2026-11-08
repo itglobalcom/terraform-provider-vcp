@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - staging
   pull_request:
 
 permissions:
@@ -25,6 +26,10 @@ jobs:
           cache: true
 
       - run: go mod download
+
+      - name: SDK pinned to a final tag
+        if: github.ref == 'refs/heads/main'
+        run: make check-sdk-release
 
       - run: go build -v ./...
 

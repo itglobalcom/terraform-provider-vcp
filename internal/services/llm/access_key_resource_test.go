@@ -334,6 +334,29 @@ func TestAccessKeyRead(t *testing.T) {
 			t.Errorf("state = %v, want active as the API reports it", state.State)
 		}
 	})
+
+	t.Run("suspended by the project quota — stays in state with that state", func(t *testing.T) {
+		api := newFakeAPI(t)
+		api.addGroup(10, "team", entities.LLMGroupStateSuspendedByProjectQuota)
+		api.addKey(701, 10, "ci", &entities.LLMAccessKeyLocks{})
+		api.keys[701].state = entities.LLMAccessKeyStateSuspendedByProjectQuota
+
+		res := NewAccessKeyResource()
+		configure(t, res, api.client(t))
+		s := resourceSchema(t, res)
+		prior := stateOf(t, s, keyAt(10, 701, false, types.StringNull()))
+		resp := resource.ReadResponse{State: prior}
+		res.Read(context.Background(), resource.ReadRequest{State: prior}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Read failed: %v", resp.Diagnostics)
+		}
+
+		var state accessKeyModel
+		readModel(t, resp.State, &state)
+		if state.State.ValueString() != "suspended_by_project_quota" || state.Secret.ValueString() != "sk-kept" {
+			t.Errorf("state = %v, secret = %v, want suspended_by_project_quota with the secret kept", state.State, state.Secret)
+		}
+	})
 }
 
 func TestAccessKeyDelete(t *testing.T) {

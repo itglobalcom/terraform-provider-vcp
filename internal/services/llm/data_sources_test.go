@@ -98,6 +98,28 @@ func TestModelDataSourceRead(t *testing.T) {
 	}
 }
 
+func TestModelDataSourceReadCreditsOnly(t *testing.T) {
+	api := newFakeAPI(t)
+	api.setRaw("llm/models/7", `{"model": {
+		"id": 7, "tech_title": "gpt-x", "name": "GPT X", "vendor": "acme", "kind": "text", "contour": "external",
+		"is_pii_protected": false, "context_size": 8192, "unit_kind": "tokens", "endpoint": "https://llm.example/v1",
+		"is_available_to_groups": true, "prices": [{"unit": "input_tokens", "credits": 1.5}]
+	}}`)
+
+	config := modelModel{}
+	config.ID = types.Int64Value(7)
+	config.StorageCountries = types.ListNull(types.StringType)
+	var out modelModel
+	readDataSource(t, api, NewModelDataSource(), &config, &out)
+
+	if out.CreditPrice != nil {
+		t.Errorf("credit_price = %+v, want null in a project without money", out.CreditPrice)
+	}
+	if len(out.Prices) != 1 || !out.Prices[0].Money.IsNull() || out.Prices[0].Credits.ValueFloat64() != 1.5 {
+		t.Errorf("prices = %+v, want 1.5 credits and no money", out.Prices)
+	}
+}
+
 func TestPackageDataSourceRead(t *testing.T) {
 	t.Run("no package, no stop", func(t *testing.T) {
 		api := newFakeAPI(t)
@@ -138,8 +160,12 @@ func TestPackageDataSourceRead(t *testing.T) {
 		readDataSource(t, api, NewPackageDataSource(), nil, &out)
 
 		if out.Package == nil || out.Package.ID.ValueInt64() != 3 || !out.Package.AutoRenew.ValueBool() ||
-			!out.Package.FullMonthPrice.IsNull() {
-			t.Errorf("package = %+v, want 3 with auto renew and no full-month price", out.Package)
+			!out.Package.FullMonthPrice.IsNull() || out.Package.Price.ValueFloat64() != 950 ||
+			out.Package.DiscountPercent.ValueFloat64() != 5 {
+			t.Errorf("package = %+v, want 3 for 950 at 5%% with auto renew and no full-month price", out.Package)
+		}
+		if out.Currency.ValueString() != "RUB" {
+			t.Errorf("currency = %v, want RUB", out.Currency)
 		}
 		if out.Stop == nil || out.Stop.Reason.ValueString() != "package_exhausted" {
 			t.Errorf("stop = %+v, want package_exhausted", out.Stop)
@@ -148,24 +174,64 @@ func TestPackageDataSourceRead(t *testing.T) {
 			t.Errorf("tax_label/price = %v/%v", out.TaxLabel, out.PricePerCredit)
 		}
 	})
+
+	// Usage in credits only: the API leaves out every price and the currency
+	// (or sends it empty); an empty currency read as a value claims a real one.
+	t.Run("credits only, stopped by the project quota", func(t *testing.T) {
+		api := newFakeAPI(t)
+		api.setRaw("llm/package", `{"package": {
+			"package": {"id": 3, "tech_title": "S", "volume_credits": 1000,
+			            "period_from": "2026-11-01", "period_to": "2026-12-01", "auto_renew": false, "state": "active"},
+			"usage": {"period_from": "2026-11-01", "period_to": "2026-12-01", "total_credits": 1000,
+			          "package_volume_credits": 1000, "in_package_credits": 1000, "over_package_credits": 0},
+			"currency": "", "packages_disabled": false, "exhausted_package_mode": "stop",
+			"stop": {"stopped_at": "2026-11-20T10:00:00Z", "reason": "project_quota_exhausted", "state": "stopped"}
+		}}`)
+
+		var out currentPackageModel
+		readDataSource(t, api, NewPackageDataSource(), nil, &out)
+
+		if out.Package == nil || out.Package.VolumeCredits.ValueFloat64() != 1000 {
+			t.Fatalf("package = %+v, want 1000 credits", out.Package)
+		}
+		if !out.Package.Price.IsNull() || !out.Package.DiscountPercent.IsNull() {
+			t.Errorf("price/discount = %v/%v, want null in a package without a price",
+				out.Package.Price, out.Package.DiscountPercent)
+		}
+		if !out.Currency.IsNull() || !out.PricePerCredit.IsNull() || !out.TaxLabel.IsNull() {
+			t.Errorf("currency/price per credit/tax label = %v/%v/%v, want null", out.Currency, out.PricePerCredit, out.TaxLabel)
+		}
+		if out.Stop == nil || out.Stop.Reason.ValueString() != "project_quota_exhausted" {
+			t.Errorf("stop = %+v, want project_quota_exhausted", out.Stop)
+		}
+	})
 }
 
 func TestPackagePlansDataSourceRead(t *testing.T) {
 	api := newFakeAPI(t)
 	api.setRaw("llm/package-plans", `{"package_plans": [
-		{"id": 1, "tech_title": "S", "description": "Small", "volume_credits": 1000, "discount_percent": 5,
+		{"id": 1, "source": "catalog", "tech_title": "S", "description": "Small", "volume_credits": 1000, "discount_percent": 5,
 		 "price": 950, "currency": "RUB", "tax_label": "nds_excluded",
 		 "current_month": {"period_from": "2026-11-07", "period_to": "2026-12-01", "volume_credits": 800, "price": 760}},
-		{"id": 2, "tech_title": "M", "volume_credits": 5000, "discount_percent": 10, "price": 4500, "currency": "RUB"}
+		{"id": 2, "source": "catalog", "tech_title": "M", "volume_credits": 5000, "discount_percent": 10, "price": 4500, "currency": "RUB"},
+		{"id": 1, "source": "individual", "tech_title": "L", "volume_credits": 9000,
+		 "current_month": {"period_from": "2026-11-07", "period_to": "2026-12-01", "volume_credits": 7000}}
 	]}`)
 
 	var out packagePlansModel
 	readDataSource(t, api, NewPackagePlansDataSource(), nil, &out)
 
-	if len(out.Plans) != 2 {
-		t.Fatalf("read %d plans, want 2", len(out.Plans))
+	if len(out.Plans) != 3 {
+		t.Fatalf("read %d plans, want 3", len(out.Plans))
 	}
-	small, medium := out.Plans[0], out.Plans[1]
+	small, medium, credits := out.Plans[0], out.Plans[1], out.Plans[2]
+	// A catalog package and an individual package sharing an id read as one
+	// indistinguishable plan when source is dropped.
+	if small.ID.ValueInt64() != 1 || small.Source.ValueString() != "catalog" ||
+		credits.ID.ValueInt64() != 1 || credits.Source.ValueString() != "individual" {
+		t.Errorf("plans S, L = (%v, %v), (%v, %v), want (1, catalog), (1, individual)",
+			small.ID, small.Source, credits.ID, credits.Source)
+	}
 	if small.CurrentMonth == nil || small.CurrentMonth.Price.ValueFloat64() != 760 ||
 		small.Description.ValueString() != "Small" || small.TaxLabel.ValueString() != "nds_excluded" {
 		t.Errorf("plan S = %+v, want its description, tax label and month terms", small)
@@ -173,7 +239,16 @@ func TestPackagePlansDataSourceRead(t *testing.T) {
 	if medium.CurrentMonth != nil || !medium.Description.IsNull() || !medium.TaxLabel.IsNull() {
 		t.Errorf("plan M = %+v, want no month terms, description or tax label", medium)
 	}
-	if medium.Price.ValueFloat64() != 4500 || medium.TechTitle.ValueString() != "M" {
-		t.Errorf("plan M = %+v, want M for 4500", medium)
+	if medium.Price.ValueFloat64() != 4500 || medium.TechTitle.ValueString() != "M" ||
+		medium.DiscountPercent.ValueFloat64() != 10 || medium.Currency.ValueString() != "RUB" {
+		t.Errorf("plan M = %+v, want M for 4500 RUB at 10%%", medium)
+	}
+	if !credits.Price.IsNull() || !credits.DiscountPercent.IsNull() || !credits.Currency.IsNull() ||
+		!credits.TaxLabel.IsNull() || credits.VolumeCredits.ValueFloat64() != 9000 {
+		t.Errorf("plan L = %+v, want 9000 credits and no price, discount, currency or tax label", credits)
+	}
+	if credits.CurrentMonth == nil || !credits.CurrentMonth.Price.IsNull() ||
+		credits.CurrentMonth.VolumeCredits.ValueFloat64() != 7000 {
+		t.Errorf("plan L month = %+v, want 7000 credits and no price", credits.CurrentMonth)
 	}
 }
