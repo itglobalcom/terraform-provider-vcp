@@ -86,7 +86,7 @@ check-release: ## Build without go.work (as in CI/release, SDK from go.mod)
 	GOWORK=off go build ./...
 
 check-sdk-release: ## SDK in go.mod is a final tag vX.Y.Z — required on main and for a release
-	@v=$$(GOWORK=off go list -m -f '{{.Version}}' $(SDK_MODULE)); \
+	@v=$$(GOWORK=off go list -m -f '{{with .Replace}}replace => {{.Path}} {{.Version}}{{else}}{{.Version}}{{end}}' $(SDK_MODULE)); \
 	if echo "$$v" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then echo "✓ SDK $$v"; \
 	else echo "SDK is pinned to $$v: main and a release need a final SDK tag vX.Y.Z; an rc tag or a pseudo-version is for staging only" >&2; exit 1; fi
 
