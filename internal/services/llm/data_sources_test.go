@@ -210,11 +210,11 @@ func TestPackageDataSourceRead(t *testing.T) {
 func TestPackagePlansDataSourceRead(t *testing.T) {
 	api := newFakeAPI(t)
 	api.setRaw("llm/package-plans", `{"package_plans": [
-		{"id": 1, "tech_title": "S", "description": "Small", "volume_credits": 1000, "discount_percent": 5,
+		{"id": 1, "source": "catalog", "tech_title": "S", "description": "Small", "volume_credits": 1000, "discount_percent": 5,
 		 "price": 950, "currency": "RUB", "tax_label": "nds_excluded",
 		 "current_month": {"period_from": "2026-11-07", "period_to": "2026-12-01", "volume_credits": 800, "price": 760}},
-		{"id": 2, "tech_title": "M", "volume_credits": 5000, "discount_percent": 10, "price": 4500, "currency": "RUB"},
-		{"id": 3, "tech_title": "L", "volume_credits": 9000,
+		{"id": 2, "source": "catalog", "tech_title": "M", "volume_credits": 5000, "discount_percent": 10, "price": 4500, "currency": "RUB"},
+		{"id": 1, "source": "individual", "tech_title": "L", "volume_credits": 9000,
 		 "current_month": {"period_from": "2026-11-07", "period_to": "2026-12-01", "volume_credits": 7000}}
 	]}`)
 
@@ -225,6 +225,13 @@ func TestPackagePlansDataSourceRead(t *testing.T) {
 		t.Fatalf("read %d plans, want 3", len(out.Plans))
 	}
 	small, medium, credits := out.Plans[0], out.Plans[1], out.Plans[2]
+	// A catalog package and an individual package sharing an id read as one
+	// indistinguishable plan when source is dropped.
+	if small.ID.ValueInt64() != 1 || small.Source.ValueString() != "catalog" ||
+		credits.ID.ValueInt64() != 1 || credits.Source.ValueString() != "individual" {
+		t.Errorf("plans S, L = (%v, %v), (%v, %v), want (1, catalog), (1, individual)",
+			small.ID, small.Source, credits.ID, credits.Source)
+	}
 	if small.CurrentMonth == nil || small.CurrentMonth.Price.ValueFloat64() != 760 ||
 		small.Description.ValueString() != "Small" || small.TaxLabel.ValueString() != "nds_excluded" {
 		t.Errorf("plan S = %+v, want its description, tax label and month terms", small)
