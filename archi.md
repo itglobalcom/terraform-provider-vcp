@@ -91,13 +91,15 @@ id, `VmwareTaskID`) и LLM (`vcp_llm_*`, целочисленные id, `TaskID`
   `make docs-generate` — после него `docs/` без диффа; `terraform fmt -check
   -recursive examples/` — `examples/` рендерится в `docs/`; `make check-release`
   (`GOWORK=off go build ./...`) — доказывает, что версия SDK в `go.mod`
-  опубликована и `replace` не просочился; `make validate-configs` — реальный
+  опубликована и `replace` не просочился; `make check-sdk-release` — SDK
+  в `go.mod` закреплён финальным тегом, на `main` и в релизе; `make validate-configs` — реальный
   `terraform validate` по примерам и acceptance-конфигурациям против собранного
   бинаря.
 - Pipeline: `.github/workflows/test.yml` гоняет те же гейты (сборка, `gofmt`,
   golangci-lint той же версии, `terraform fmt`, unit-тесты, отдельная job на
-  актуальность `docs/`); `.github/workflows/release.yml` — goreleaser по тегу
-  `v*`. Acceptance-тесты пайплайн не запускает: им нужны живые `VCP_*` и они
+  актуальность `docs/`, `make check-sdk-release` на `main`);
+  `.github/workflows/release.yml` — `make check-sdk-release` и goreleaser
+  по тегу `v*`. Acceptance-тесты пайплайн не запускает: им нужны живые `VCP_*` и они
   создают тарифицируемые ресурсы (см. Known legacy deviations).
 - Done: гейты зелёные; новый ресурс или data source зарегистрирован
   в `internal/provider/provider.go`; у него есть пример в `examples/`
