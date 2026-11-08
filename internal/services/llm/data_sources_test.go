@@ -98,8 +98,6 @@ func TestModelDataSourceRead(t *testing.T) {
 	}
 }
 
-// A project whose usage is in credits only gets no money from the API: the
-// model reads with no credit price and prices in credits alone.
 func TestModelDataSourceReadCreditsOnly(t *testing.T) {
 	api := newFakeAPI(t)
 	api.setRaw("llm/models/7", `{"model": {
@@ -238,7 +236,6 @@ func TestPackagePlansDataSourceRead(t *testing.T) {
 		medium.DiscountPercent.ValueFloat64() != 10 || medium.Currency.ValueString() != "RUB" {
 		t.Errorf("plan M = %+v, want M for 4500 RUB at 10%%", medium)
 	}
-	// A plan in a project whose usage is in credits only comes without prices.
 	if !credits.Price.IsNull() || !credits.DiscountPercent.IsNull() || !credits.Currency.IsNull() ||
 		!credits.TaxLabel.IsNull() || credits.VolumeCredits.ValueFloat64() != 9000 {
 		t.Errorf("plan L = %+v, want 9000 credits and no price, discount, currency or tax label", credits)
