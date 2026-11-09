@@ -20,6 +20,7 @@ import (
 	gateway_attachment "github.com/itglobalcom/terraform-provider-vcp/internal/services/gateway_network_attachment"
 	gateway_rules "github.com/itglobalcom/terraform-provider-vcp/internal/services/gateway_rules"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/isolated_network"
+	"github.com/itglobalcom/terraform-provider-vcp/internal/services/llm"
 	"github.com/itglobalcom/terraform-provider-vcp/internal/services/metadata"
 	vstack_server "github.com/itglobalcom/terraform-provider-vcp/internal/services/server"
 	server_backup "github.com/itglobalcom/terraform-provider-vcp/internal/services/server_backup"
@@ -64,7 +65,8 @@ func (p *CloudProvider) Schema(ctx context.Context, req provider.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "The VStack Cloud Panel (`vcp`) provider manages VStack Cloud Panel resources — " +
 			"servers, isolated networks, gateways, DNS zones, SSH keys, and affinity groups, " +
-			"as well as VMware Cloud servers and networks (`vcp_vmware_*`). " +
+			"VMware Cloud servers and networks (`vcp_vmware_*`), " +
+			"and the LLM service — its connection, groups and access keys (`vcp_llm_*`). " +
 			"Configure it with an API endpoint (`host`) and token (`key`), or the `VCP_API_URL` / " +
 			"`VCP_API_TOKEN` environment variables.",
 		Attributes: map[string]schema.Attribute{
@@ -238,6 +240,9 @@ func (p *CloudProvider) Resources(ctx context.Context) []func() resource.Resourc
 		vmware.NewEdgeFirewallResource,
 		vmware.NewEdgeNATResource,
 		vmware.NewEdgeVPNTunnelResource,
+		llm.NewConnectionResource,
+		llm.NewGroupResource,
+		llm.NewAccessKeyResource,
 	}
 }
 
@@ -272,5 +277,9 @@ func (p *CloudProvider) DataSources(ctx context.Context) []func() datasource.Dat
 		vmware.NewServersDataSource,
 		vmware.NewNetworkDataSource,
 		vmware.NewNetworksDataSource,
+		llm.NewModelsDataSource,
+		llm.NewModelDataSource,
+		llm.NewPackageDataSource,
+		llm.NewPackagePlansDataSource,
 	}
 }

@@ -58,3 +58,7 @@ func VmwareNetwork(id int) func() { return lock("vmware-network:" + strconv.Itoa
 // (vcp_vmware_server, vcp_vmware_server_firewall,
 // vcp_vmware_server_network_attachment, vcp_vmware_server_public_interface).
 func VmwareServer(id int) func() { return lock("vmware-server:" + strconv.Itoa(id)) }
+
+// LLMGroup serializes mutating operations on a single LLM group and on its
+// access keys (vcp_llm_group, vcp_llm_access_key).
+func LLMGroup(id int) func() { return lock("llm-group:" + strconv.Itoa(id)) }

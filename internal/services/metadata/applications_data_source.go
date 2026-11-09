@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	sdk "github.com/itglobalcom/vstack-cloud-panel-sdk"
+	"github.com/itglobalcom/vstack-cloud-panel-sdk/entities"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -33,6 +34,18 @@ type ApplicationModel struct {
 	ID         types.String   `tfsdk:"id"`
 	LocationID types.String   `tfsdk:"location_id"`
 	Images     []types.String `tfsdk:"images"`
+	// LLMKeyEnabled reports that issue_llm_key is accepted for the application.
+	LLMKeyEnabled types.Bool                  `tfsdk:"llm_key_enabled"`
+	Parameters    []ApplicationParameterModel `tfsdk:"parameters"`
+}
+
+// ApplicationParameterModel describes a value the application asks for when a server is ordered.
+type ApplicationParameterModel struct {
+	Name     types.String `tfsdk:"name"`
+	Required types.Bool   `tfsdk:"required"`
+	Secret   types.Bool   `tfsdk:"secret"`
+	Default  types.String `tfsdk:"default"`
+	LLMKind  types.String `tfsdk:"llm_kind"`
 }
 
 func (d *ApplicationsDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -65,6 +78,42 @@ func (d *ApplicationsDataSource) Schema(ctx context.Context, req datasource.Sche
 							MarkdownDescription: "List of available images for this application",
 							Computed:            true,
 							ElementType:         types.StringType,
+						},
+						"llm_key_enabled": schema.BoolAttribute{
+							MarkdownDescription: "Whether a platform language model key can be issued for the application: " +
+								"`issue_llm_key` in the `applications` block of `vcp_server` is accepted only when this is `true`.",
+							Computed: true,
+						},
+						"parameters": schema.ListNestedAttribute{
+							MarkdownDescription: "Parameters the application asks for when a server is ordered; their values go " +
+								"into `parameters` of the `applications` block of `vcp_server`, by `name`.",
+							Computed: true,
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									"name": schema.StringAttribute{
+										MarkdownDescription: "Parameter name, the key in `parameters` of the server order.",
+										Computed:            true,
+									},
+									"required": schema.BoolAttribute{
+										MarkdownDescription: "Whether the order must carry a value; a `default` stands in for a missing one.",
+										Computed:            true,
+									},
+									"secret": schema.BoolAttribute{
+										MarkdownDescription: "Whether the value is a secret that the platform does not log or echo back.",
+										Computed:            true,
+									},
+									"default": schema.StringAttribute{
+										MarkdownDescription: "Value used when the order carries none; empty when there is no default.",
+										Computed:            true,
+									},
+									"llm_kind": schema.StringAttribute{
+										MarkdownDescription: "Role of the parameter in language model access: `Key` receives the issued key, " +
+											"`Endpoint` the inference address, when the server is ordered with `issue_llm_key`. " +
+											"Empty for an ordinary parameter.",
+										Computed: true,
+									},
+								},
+							},
 						},
 					},
 				},
@@ -124,12 +173,35 @@ func (d *ApplicationsDataSource) Read(ctx context.Context, req datasource.ReadRe
 		}
 
 		data.Applications[i] = ApplicationModel{
-			ID:         types.StringValue(app.ID),
-			LocationID: types.StringValue(app.LocationID),
-			Images:     images,
+			ID:            types.StringValue(app.ID),
+			LocationID:    types.StringValue(app.LocationID),
+			Images:        images,
+			LLMKeyEnabled: types.BoolValue(app.LLMKeyEnabled),
+			Parameters:    mapApplicationParameters(app.Parameters),
 		}
 	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func mapApplicationParameters(params []entities.ApplicationParameter) []ApplicationParameterModel {
+	result := make([]ApplicationParameterModel, len(params))
+	for i, p := range params {
+		result[i] = ApplicationParameterModel{
+			Name:     types.StringValue(p.Name),
+			Required: types.BoolValue(p.Required),
+			Secret:   types.BoolValue(p.Secret),
+			Default:  optionalString(p.Default),
+			LLMKind:  optionalString(string(p.LLMKind)),
+		}
+	}
+	return result
+}
+
+func optionalString(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
 }

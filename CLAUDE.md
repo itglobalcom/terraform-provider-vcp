@@ -33,6 +33,8 @@ apply loses data) in a `~>` paragraph, which renders as a callout.
   is *committed* has to be a published version pinned in `go.mod` — `go.work` is a personal file and
   gitignored, a `go.mod` `replace` is never committed, and `make check-release` (a build without
   `go.work`) is what proves the pin resolves on its own.
+- **On `staging`, pin the SDK from its `staging`** — an rc tag `vX.Y.Z-rc.N` or the pseudo-version of
+  that commit; the final SDK tag `vX.Y.Z` is pinned when the provider is released.
 - **Acceptance tests are mandatory** — nothing is finished without them, and they cover the life of
   the resource, not one apply: create → empty plan straight after (a perpetual diff is the commonest
   defect and invisible without this step) → edit in place, asserting the object was *not* replaced →
@@ -50,17 +52,18 @@ apply loses data) in a `~>` paragraph, which renders as a callout.
 ## Architecture
 
 A package per resource family in `internal/services/`; `provider.go` is the only registry — what is
-not listed there does not exist. Two products share it: vStack (string ids) and VMware Cloud
+not listed there does not exist. Three products share it: vStack (string ids), VMware Cloud
 (`vcp_vmware_*`, integer ids, own catalog and task family — `*VmwareTaskID` and `*TaskID` must not
-be mixed). The API serializes changes per object while Terraform applies in parallel, so every
+be mixed) and LLM (`vcp_llm_*`, typed integer ids, `llm{N}` tasks through `*TaskID`). The API serializes changes per object while Terraform applies in parallel, so every
 mutating path locks its **parent** (`internal/locks`). A rule set belongs to one resource whole (an
 empty list clears it); `Optional + Computed` is for what the platform supplies; a field the API takes
 and ignores is not worth having; a nested attribute's schema and its `attr.Type` map must agree.
 Two attributes of one resource that the platform cannot hold at once are refused at plan time in
 that resource's `ValidateConfig` — an `AddAttributeError` on the attribute to drop, covered by a
-unit test — rather than left to the API to refuse mid-apply. Today the only resource doing that is
+unit test — rather than left to the API to refuse mid-apply. Today two resources do that:
 `internal/services/vmware/server_resource.go` (`public_network_id` × `network_bandwidth_mbps`,
-`gpu` × `nested_hypervisor`); both sides of such a pair should name the conflict in their schema
+`gpu` × `nested_hypervisor`) and `internal/services/server/vstack_server_resource.go`
+(`applications` × `applications_ids`); both sides of such a pair should name the conflict in their schema
 description, and `gpu` still does not. Any other check the configuration alone decides — what a type
 requires or forbids, uniqueness within a set, the size of a rule set — goes there too; a data source
 makes it in its `Read`.

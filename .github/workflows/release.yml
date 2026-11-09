@@ -26,6 +26,9 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: SDK pinned to a final tag
+        run: make check-sdk-release
+
       - name: Import GPG key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
