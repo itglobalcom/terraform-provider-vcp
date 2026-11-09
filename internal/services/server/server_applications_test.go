@@ -55,12 +55,26 @@ func serverSchema(t *testing.T) schema.Schema {
 // and the given application order, so that only the application checks can fail.
 func validateServerConfig(t *testing.T, apps types.List, appIDs []string) resource.ValidateConfigResponse {
 	t.Helper()
-	ctx := context.Background()
-	s := serverSchema(t)
 
-	model := ServerResourceModel{
+	model := orderModel()
+	model.Applications = apps
+	for _, id := range appIDs {
+		model.ApplicationsIDs = append(model.ApplicationsIDs, types.StringValue(id))
+	}
+	return validateModel(t, model)
+}
+
+// orderModel is a complete order of a server from an image: every argument the
+// order needs is set and the only volume is a boot volume.
+func orderModel() ServerResourceModel {
+	return ServerResourceModel{
+		Name:                     types.StringValue("test-acc-order"),
+		LocationID:               types.StringValue("loc-1"),
+		ImageID:                  types.StringValue("img-1"),
+		CPU:                      types.Int64Value(2),
+		RamMB:                    types.Int64Value(2048),
 		Tags:                     types.SetNull(types.StringType),
-		Applications:             apps,
+		Applications:             applicationsNull(),
 		ApplicationInstallations: types.ListNull(types.ObjectType{AttrTypes: applicationInstallationAttrTypes}),
 		Volumes: []VolumeAttrModel{{
 			Number: types.Int64Value(0),
@@ -68,9 +82,13 @@ func validateServerConfig(t *testing.T, apps types.List, appIDs []string) resour
 			SizeMB: types.Int64Value(20480),
 		}},
 	}
-	for _, id := range appIDs {
-		model.ApplicationsIDs = append(model.ApplicationsIDs, types.StringValue(id))
-	}
+}
+
+// validateModel runs ValidateConfig on the configuration the model describes.
+func validateModel(t *testing.T, model ServerResourceModel) resource.ValidateConfigResponse {
+	t.Helper()
+	ctx := context.Background()
+	s := serverSchema(t)
 
 	state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
 	if diags := state.Set(ctx, &model); diags.HasError() {

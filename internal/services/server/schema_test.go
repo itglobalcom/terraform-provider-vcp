@@ -6,10 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/defaults"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // TestServerResourceSchema_TagsIsSet guards against a regression: `tags` must
@@ -100,5 +104,98 @@ func TestServerResourceSchema_Applications(t *testing.T) {
 		if name != "id" && name != "state" && name != "outcome_reason" && name != "llm_key_id" {
 			t.Errorf("application_installations carries %q: the application sign-in is not kept in state", name)
 		}
+	}
+}
+
+// TestServerResourceSchema_OrderArgumentsOptionalComputed pins the order
+// arguments as Optional + Computed (a server that is not ordered from an image
+// gets them from the platform), while name stays Required. Each must keep its
+// state value when the configuration leaves it out: a plan left unknown would
+// show a perpetual diff, and on location_id and image_id RequiresReplace would
+// then replace the server on every plan. A changed location or image still
+// replaces it.
+func TestServerResourceSchema_OrderArgumentsOptionalComputed(t *testing.T) {
+	ctx := context.Background()
+	s := serverSchema(t)
+
+	if name := s.Attributes["name"]; !name.IsRequired() {
+		t.Error("name must stay Required")
+	}
+	for _, arg := range []string{"location_id", "image_id", "cpu", "ram_mb", "volumes"} {
+		a := s.Attributes[arg]
+		if !a.IsOptional() || !a.IsComputed() || a.IsRequired() {
+			t.Errorf("%s: Optional=%v Computed=%v Required=%v, want Optional + Computed",
+				arg, a.IsOptional(), a.IsComputed(), a.IsRequired())
+		}
+	}
+
+	model := orderModel()
+	whole := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	if diags := whole.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("building the state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: s, Raw: whole.Raw}
+
+	runString := func(arg string, config, planned, state types.String) (types.String, bool) {
+		mods := s.Attributes[arg].(schema.StringAttribute).PlanModifiers
+		value, replace := planned, false
+		for _, m := range mods {
+			resp := planmodifier.StringResponse{PlanValue: value}
+			m.PlanModifyString(ctx, planmodifier.StringRequest{
+				Path: path.Root(arg), Config: tfsdk.Config{Schema: s, Raw: whole.Raw}, Plan: plan, State: whole,
+				ConfigValue: config, PlanValue: value, StateValue: state,
+			}, &resp)
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("%s: %v", arg, resp.Diagnostics)
+			}
+			value, replace = resp.PlanValue, replace || resp.RequiresReplace
+		}
+		return value, replace
+	}
+	for _, arg := range []string{"location_id", "image_id"} {
+		got, replace := runString(arg, types.StringNull(), types.StringUnknown(), types.StringValue("kept"))
+		if !got.Equal(types.StringValue("kept")) || replace {
+			t.Errorf("%s left out of the configuration: plan %s, replace %v; want the state value, no replacement", arg, got, replace)
+		}
+		_, replace = runString(arg, types.StringValue("new"), types.StringValue("new"), types.StringValue("old"))
+		if !replace {
+			t.Errorf("%s changed in the configuration must replace the server", arg)
+		}
+	}
+
+	for _, arg := range []string{"cpu", "ram_mb"} {
+		value := types.Int64Unknown()
+		for _, m := range s.Attributes[arg].(schema.Int64Attribute).PlanModifiers {
+			resp := planmodifier.Int64Response{PlanValue: value}
+			m.PlanModifyInt64(ctx, planmodifier.Int64Request{
+				Path: path.Root(arg), Config: tfsdk.Config{Schema: s, Raw: whole.Raw}, Plan: plan, State: whole,
+				ConfigValue: types.Int64Null(), PlanValue: value, StateValue: types.Int64Value(4),
+			}, &resp)
+			value = resp.PlanValue
+		}
+		if !value.Equal(types.Int64Value(4)) {
+			t.Errorf("%s left out of the configuration: plan %s, want the state value 4", arg, value)
+		}
+	}
+
+	var stateVolumes types.List
+	if diags := whole.GetAttribute(ctx, path.Root("volumes"), &stateVolumes); diags.HasError() {
+		t.Fatalf("reading volumes: %v", diags)
+	}
+	volumes := s.Attributes["volumes"].(schema.ListNestedAttribute)
+	value := types.ListUnknown(stateVolumes.ElementType(ctx))
+	for _, m := range volumes.PlanModifiers {
+		resp := planmodifier.ListResponse{PlanValue: value}
+		m.PlanModifyList(ctx, planmodifier.ListRequest{
+			Path: path.Root("volumes"), Config: tfsdk.Config{Schema: s, Raw: whole.Raw}, Plan: plan, State: whole,
+			ConfigValue: types.ListNull(stateVolumes.ElementType(ctx)), PlanValue: value, StateValue: stateVolumes,
+		}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("volumes: %v", resp.Diagnostics)
+		}
+		value = resp.PlanValue
+	}
+	if !value.Equal(stateVolumes) {
+		t.Errorf("volumes left out of the configuration: plan %s, want the state value %s", value, stateVolumes)
 	}
 }
