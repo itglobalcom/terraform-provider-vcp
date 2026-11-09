@@ -81,14 +81,7 @@ output "application_installations" {
 
 ### Required
 
-- `cpu` (Number) Number of CPU cores
-- `image_id` (String) OS image ID to use for the server. Changing this forces a new resource.
-- `location_id` (String) Location ID where the server will be created. Changing this forces a new resource.
 - `name` (String) Server name
-- `ram_mb` (Number) RAM size in megabytes
-- `volumes` (Attributes List) List of volumes. At least one volume with `name = "boot"` is required. Volume size must be a multiple of 10240 MB (10 GB).
-
-The `number` field is a unique identifier for each volume. It must be unique across all volumes and is used to track volume changes. (see [below for nested schema](#nestedatt--volumes))
 
 ### Optional
 
@@ -97,9 +90,16 @@ The `number` field is a unique identifier for each volume. It must be unique acr
 
 ~> Changing this forces a new resource. Conflicts with `applications_ids`: an order with `applications` does not apply `applications_ids`, so set one or the other. (see [below for nested schema](#nestedatt--applications))
 - `applications_ids` (Set of String) Set of application IDs to install on the server, without parameters. Only applied during creation. **Changing this forces a new resource.** Conflicts with `applications`, which also takes parameter values and a language model key; set one or the other.
+- `cpu` (Number) Number of CPU cores. Required when ordering a server.
+- `image_id` (String) OS image ID to use for the server. Required when ordering a server. Changing this forces a new resource.
 - `init_script` (String) Bash init script. It will run once on the first start. Only applied during creation. **Changing this forces a new resource.**
+- `location_id` (String) Location ID where the server will be created. Required when ordering a server. Changing this forces a new resource.
+- `ram_mb` (Number) RAM size in megabytes. Required when ordering a server.
 - `ssh_key_ids` (Set of Number) Set of SSH key IDs to add to the server. SSH keys are only applied during server creation. **Changing this forces a new resource.**
 - `tags` (Set of String) Set of tags associated with the server. If attribute is omitted, all existing tags will be removed.
+- `volumes` (Attributes List) List of volumes. Required when ordering a server, with at least one volume named `boot`. Volume size must be a multiple of 10240 MB (10 GB).
+
+The `number` field is a unique identifier for each volume. It must be unique across all volumes and is used to track volume changes. (see [below for nested schema](#nestedatt--volumes))
 
 ### Read-Only
 
@@ -110,6 +110,19 @@ The `number` field is a unique identifier for each volume. It must be unique acr
 - `login` (String, Sensitive) Server login username
 - `password` (String, Sensitive) Server password
 - `state` (String) Server state (New, Active, Busy, Blocked)
+
+<a id="nestedatt--applications"></a>
+### Nested Schema for `applications`
+
+Required:
+
+- `id` (String) Application ID from the `vcp_applications` data source. An application is listed once per server.
+
+Optional:
+
+- `issue_llm_key` (Boolean) Issue a platform language model key for the application and pass it, with the inference address, into the parameters the catalog marks with `llm_kind`. Accepted only for an application whose catalog entry has `llm_key_enabled`. Defaults to `false`.
+- `parameters` (Map of String, Sensitive) Parameter values by parameter name, as the catalog entry names them in `parameters`. Every `required` parameter without a `default` must be set; a name the application does not declare is refused.
+
 
 <a id="nestedatt--volumes"></a>
 ### Nested Schema for `volumes`
@@ -124,19 +137,6 @@ Read-Only:
 
 - `created` (String) Volume creation timestamp
 - `id` (Number) Volume ID from API (computed)
-
-
-<a id="nestedatt--applications"></a>
-### Nested Schema for `applications`
-
-Required:
-
-- `id` (String) Application ID from the `vcp_applications` data source. An application is listed once per server.
-
-Optional:
-
-- `issue_llm_key` (Boolean) Issue a platform language model key for the application and pass it, with the inference address, into the parameters the catalog marks with `llm_kind`. Accepted only for an application whose catalog entry has `llm_key_enabled`. Defaults to `false`.
-- `parameters` (Map of String, Sensitive) Parameter values by parameter name, as the catalog entry names them in `parameters`. Every `required` parameter without a `default` must be set; a name the application does not declare is refused.
 
 
 <a id="nestedatt--application_installations"></a>

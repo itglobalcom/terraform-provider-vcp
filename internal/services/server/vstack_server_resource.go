@@ -8,8 +8,12 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
@@ -59,16 +63,22 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Required:            true,
 			},
 			"location_id": schema.StringAttribute{
-				MarkdownDescription: "Location ID where the server will be created. Changing this forces a new resource.",
-				Required:            true,
+				MarkdownDescription: "Location ID where the server will be created. Required when ordering a server. " +
+					"Changing this forces a new resource.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"image_id": schema.StringAttribute{
-				MarkdownDescription: "OS image ID to use for the server. Changing this forces a new resource.",
-				Required:            true,
+				MarkdownDescription: "OS image ID to use for the server. Required when ordering a server. " +
+					"Changing this forces a new resource.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -95,12 +105,20 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				},
 			},
 			"cpu": schema.Int64Attribute{
-				MarkdownDescription: "Number of CPU cores",
-				Required:            true,
+				MarkdownDescription: "Number of CPU cores. Required when ordering a server.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"ram_mb": schema.Int64Attribute{
-				MarkdownDescription: "RAM size in megabytes",
-				Required:            true,
+				MarkdownDescription: "RAM size in megabytes. Required when ordering a server.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			// SSH Keys. Set, not List: order-insensitive to the API, and a List +
 			// RequiresReplace would plan a destructive server replacement on a
@@ -140,12 +158,15 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			},
 			// Volumes
 			"volumes": schema.ListNestedAttribute{
-				MarkdownDescription: "List of volumes. At least one volume with `name = \"boot\"` is required. " +
+				MarkdownDescription: "List of volumes. Required when ordering a server, with at least one volume " +
+					"named `boot`. " +
 					"Volume size must be a multiple of 10240 MB (10 GB).\n\n" +
 					"The `number` field is a unique identifier for each volume. " +
 					"It must be unique across all volumes and is used to track volume changes.",
-				Required: true,
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
 					VolumesNumberChangeModifier(),
 				},
 				NestedObject: schema.NestedAttributeObject{
@@ -236,12 +257,19 @@ func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.Valida
 		return
 	}
 
-	// Validate Volumes
+	var volumes types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("volumes"), &volumes)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	validateOrderArguments(data, volumes, &resp.Diagnostics)
+
 	if err := r.validateUniqueVolumeNumbers(data.Volumes); err != nil {
 		resp.Diagnostics.AddError("Invalid Volume Configuration", err.Error())
 	}
 
-	if r.findBootVolume(data.Volumes) == nil {
+	if !volumes.IsNull() && r.findBootVolume(data.Volumes) == nil {
 		resp.Diagnostics.AddError("Missing Boot Volume",
 			"At least one volume with name=\"boot\" is required")
 	}
@@ -253,6 +281,28 @@ func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.Valida
 	}
 
 	validateApplications(ctx, data, &resp.Diagnostics)
+}
+
+// validateOrderArguments refuses an order that leaves out an argument the
+// schema keeps Optional + Computed: a server ordered from an image cannot be
+// created without it.
+func validateOrderArguments(data ServerResourceModel, volumes types.List, diags *diag.Diagnostics) {
+	for _, arg := range []struct {
+		name     string
+		declared bool
+	}{
+		{"location_id", !data.LocationID.IsNull()},
+		{"image_id", !data.ImageID.IsNull()},
+		{"cpu", !data.CPU.IsNull()},
+		{"ram_mb", !data.RamMB.IsNull()},
+		{"volumes", !volumes.IsNull()},
+	} {
+		if arg.declared {
+			continue
+		}
+		diags.AddAttributeError(path.Root(arg.name), "Missing Attribute",
+			fmt.Sprintf("%s is needed to order a server. Set it in the configuration.", arg.name))
+	}
 }
 
 func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
