@@ -401,9 +401,6 @@ func (r *ServerResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 }
 
 func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	// Two ways a server comes into being: ordered from an image, or cloned from a
-	// server that already exists. Which one the configuration describes is
-	// settled at plan time (ValidateConfig, ModifyPlan), so here it is one branch.
 	var cloneFrom types.String
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("clone_from_server_id"), &cloneFrom)...)
 	if resp.Diagnostics.HasError() {
