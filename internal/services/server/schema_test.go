@@ -199,3 +199,52 @@ func TestServerResourceSchema_OrderArgumentsOptionalComputed(t *testing.T) {
 		t.Errorf("volumes left out of the configuration: plan %s, want the state value %s", value, stateVolumes)
 	}
 }
+
+// TestServerResourceSchema_CloneFromServerID pins clone_from_server_id as a
+// create-only argument: Optional and not Computed (the API never reports the
+// source, so a Computed value would be made up), and changing or removing it
+// replaces the server — the clone cannot be re-made from another source in
+// place. Keeping the value plans no replacement.
+func TestServerResourceSchema_CloneFromServerID(t *testing.T) {
+	ctx := context.Background()
+	s := serverSchema(t)
+
+	a, ok := s.Attributes["clone_from_server_id"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf(`"clone_from_server_id" must be schema.StringAttribute, got %T`, s.Attributes["clone_from_server_id"])
+	}
+	if !a.Optional || a.Computed || a.Required {
+		t.Errorf("clone_from_server_id: Optional=%v Computed=%v Required=%v, want Optional only",
+			a.Optional, a.Computed, a.Required)
+	}
+
+	model := orderModel()
+	model.CloneFromServerID = types.StringValue("src-1")
+	whole := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+	if diags := whole.Set(ctx, &model); diags.HasError() {
+		t.Fatalf("building the state: %v", diags)
+	}
+
+	replaces := func(config, state types.String) bool {
+		replace := false
+		for _, m := range a.PlanModifiers {
+			resp := planmodifier.StringResponse{PlanValue: config}
+			m.PlanModifyString(ctx, planmodifier.StringRequest{
+				Path: path.Root("clone_from_server_id"), Config: tfsdk.Config{Schema: s, Raw: whole.Raw},
+				Plan: tfsdk.Plan{Schema: s, Raw: whole.Raw}, State: whole,
+				ConfigValue: config, PlanValue: config, StateValue: state,
+			}, &resp)
+			replace = replace || resp.RequiresReplace
+		}
+		return replace
+	}
+	if !replaces(types.StringValue("src-2"), types.StringValue("src-1")) {
+		t.Error("a changed clone_from_server_id must replace the server")
+	}
+	if !replaces(types.StringNull(), types.StringValue("src-1")) {
+		t.Error("a removed clone_from_server_id must replace the server")
+	}
+	if replaces(types.StringValue("src-1"), types.StringValue("src-1")) {
+		t.Error("an unchanged clone_from_server_id must not replace the server")
+	}
+}
