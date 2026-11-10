@@ -56,3 +56,19 @@ resource "vcp_server" "with_app" {
 output "application_installations" {
   value = vcp_server.with_app.application_installations
 }
+
+# A clone of an existing server. Power the source off before the apply: only a
+# stopped server is cloned. The clone takes CPU, RAM and volumes from its
+# source, so name is the only other argument it accepts while it is created;
+# afterwards cpu, ram_mb and volumes can be added here and are changed in place.
+# For a Windows source the name is the host name of the clone and must not
+# exceed 15 characters.
+variable "source_server_id" {
+  description = "ID of the stopped server to clone."
+  type        = string
+}
+
+resource "vcp_server" "clone" {
+  name                 = "app-server-clone"
+  clone_from_server_id = var.source_server_id
+}
