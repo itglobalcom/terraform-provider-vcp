@@ -47,6 +47,18 @@ func PreCheckServer(t *testing.T) {
 	}
 }
 
+// PreCheckServerClone checks everything PreCheck requires and skips the test
+// unless VCP_CLONE_LOCATION_ID and VCP_CLONE_IMAGE_ID are set: cloning needs a
+// location whose cluster allows it and an OS image marked for cloning, which a
+// stand may not have, so the clone tests are opt-in.
+func PreCheckServerClone(t *testing.T) {
+	PreCheck(t)
+
+	if os.Getenv("VCP_CLONE_LOCATION_ID") == "" || os.Getenv("VCP_CLONE_IMAGE_ID") == "" {
+		t.Skip("VCP_CLONE_LOCATION_ID and VCP_CLONE_IMAGE_ID are not set; skipping server clone acceptance test")
+	}
+}
+
 // PreCheckVmware checks the environment variables required by the VMware Cloud
 // acceptance tests. VMware is a separate service with its own catalog, so it has
 // its own location variable rather than reusing VCP_LOCATION_ID.
