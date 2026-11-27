@@ -2,8 +2,10 @@ package acctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -99,6 +101,12 @@ func SweepNetworks(region string) error {
 }
 
 // SweepServers deletes test servers (matched by the test-* name prefix).
+//
+// It makes two passes. The API refuses with a 400 to delete the source of a
+// live clone, and a clone stays live until its own deletion has finished on the
+// platform, so a source listed before its clones is refused in the first pass.
+// The second pass waits for the first pass's deletions to finish and retries the
+// refused ones; a refusal for any other reason is then reported as before.
 func SweepServers(region string) error {
 	log.Printf("[INFO] Starting sweep of VStack servers")
 
@@ -117,7 +125,11 @@ func SweepServers(region string) error {
 
 	log.Printf("[INFO] Found %d servers, checking for test servers", len(servers))
 
-	var sweeperErrors []error
+	var (
+		sweeperErrors []error
+		deleted       []string
+		refused       []*entities.Server
+	)
 	sweeperCount := 0
 
 	for _, server := range servers {
@@ -131,6 +143,13 @@ func SweepServers(region string) error {
 			server.Name, server.ID, server.State)
 
 		if err := client.DeleteServer(ctx, server.ID); err != nil {
+			var re *sdk.RequestError
+			if errors.As(err, &re) && re.StatusCode == http.StatusBadRequest {
+				log.Printf("[INFO] Deletion of server %s (%s) refused, retrying after the others: %s",
+					server.Name, server.ID, err)
+				refused = append(refused, server)
+				continue
+			}
 			sweeperError := fmt.Errorf("error deleting server %s (%s): %w",
 				server.Name, server.ID, err)
 			log.Printf("[ERROR] %s", sweeperError)
@@ -138,7 +157,28 @@ func SweepServers(region string) error {
 			continue
 		}
 
+		deleted = append(deleted, server.ID)
 		log.Printf("[INFO] ✓ Successfully deleted server: %s (ID: %s)", server.Name, server.ID)
+	}
+
+	if len(refused) > 0 {
+		for _, id := range deleted {
+			if err := waitServerGone(ctx, client, id, 5*time.Minute); err != nil {
+				log.Printf("[WARN] %s", err)
+			}
+		}
+
+		for _, server := range refused {
+			log.Printf("[INFO] Retrying deletion of test server: %s (ID: %s)", server.Name, server.ID)
+			if err := client.DeleteServer(ctx, server.ID); err != nil && !sdk.IsNotFound(err) {
+				sweeperError := fmt.Errorf("error deleting server %s (%s): %w",
+					server.Name, server.ID, err)
+				log.Printf("[ERROR] %s", sweeperError)
+				sweeperErrors = append(sweeperErrors, sweeperError)
+				continue
+			}
+			log.Printf("[INFO] ✓ Successfully deleted server: %s (ID: %s)", server.Name, server.ID)
+		}
 	}
 
 	if sweeperCount == 0 {
@@ -494,6 +534,24 @@ func waitNetworkDetached(ctx context.Context, client *sdk.CloudClient, networkID
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("network %s still has attachments after %v: %w", networkID, timeout, ctx.Err())
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+// waitServerGone polls the server until the API no longer finds it, or the
+// timeout elapses: DeleteServer only starts the deletion.
+func waitServerGone(ctx context.Context, client *sdk.CloudClient, serverID string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		if _, err := client.GetServer(ctx, serverID); sdk.IsNotFound(err) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("server %s still exists after %v: %w", serverID, timeout, ctx.Err())
 		case <-time.After(10 * time.Second):
 		}
 	}

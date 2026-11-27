@@ -4,14 +4,32 @@ page_title: "vcp_server Resource - vcp"
 subcategory: ""
 description: |-
   Manages a virtual server (VM) instance.
-  Note: At least one volume with name = "boot" is required. Changing location_id or image_id will force recreation of the server.
+  Note: An ordered server needs at least one volume with name = "boot". Changing location_id or image_id will force recreation of the server.
+  Cloning an existing server
+  clone_from_server_id is the second way to bring a server into being: instead of ordering one from an image, the platform clones a server of the same project, disks and all. The clone takes CPU, RAM, volumes, networks, login and password from its source, gets new MAC and IP addresses, and is created in the location of the source; snapshots, the backup schedule, applications and tags are not carried over. clone_from_server_id and name are therefore the only arguments a clone accepts — declare anything else and the plan says so. Once the clone exists it is an ordinary server: add cpu, ram_mb, volumes and the rest to the same resource and the next apply changes them in place.
+  ~> Power the source off before the apply. The platform clones only a stopped server, and only on a location and an OS image that allow cloning; a clone of a clone is refused.
+  ~> While a clone lives, its source is restricted: the source cannot be deleted, rolled back to a snapshot taken before the clone, lose a volume it had when the clone was made, or be restored from a backup in place (restoring next to it works). Delete the clones first; a clone that refers to its source (clone_from_server_id = vcp_server.<source>.id) is destroyed before it by Terraform itself.
+  ~> Windows clone: its host name is the clone name, so the name must not exceed 15 characters. Do not power a Windows clone off until its first boot has finished: stopped earlier, it keeps the host name, DNS and IP addresses of its source for good.
+  ~> clone_from_server_id records where the server came from — the API never reports it. Like the other create-only arguments, changing or removing it replaces the server: keep it, or add lifecycle { ignore_changes = [clone_from_server_id] }. An imported server has it null.
 ---
 
 # vcp_server (Resource)
 
 Manages a virtual server (VM) instance.
 
-**Note:** At least one volume with `name = "boot"` is required. Changing `location_id` or `image_id` will force recreation of the server.
+**Note:** An ordered server needs at least one volume with `name = "boot"`. Changing `location_id` or `image_id` will force recreation of the server.
+
+### Cloning an existing server
+
+`clone_from_server_id` is the second way to bring a server into being: instead of ordering one from an image, the platform clones a server of the same project, disks and all. The clone takes CPU, RAM, volumes, networks, login and password from its source, gets new MAC and IP addresses, and is created in the location of the source; snapshots, the backup schedule, applications and tags are not carried over. `clone_from_server_id` and `name` are therefore the only arguments a clone accepts — declare anything else and the plan says so. Once the clone exists it is an ordinary server: add `cpu`, `ram_mb`, `volumes` and the rest to the same resource and the next apply changes them in place.
+
+~> **Power the source off before the apply.** The platform clones only a stopped server, and only on a location and an OS image that allow cloning; a clone of a clone is refused.
+
+~> **While a clone lives, its source is restricted:** the source cannot be deleted, rolled back to a snapshot taken before the clone, lose a volume it had when the clone was made, or be restored from a backup in place (restoring next to it works). Delete the clones first; a clone that refers to its source (`clone_from_server_id = vcp_server.<source>.id`) is destroyed before it by Terraform itself.
+
+~> **Windows clone:** its host name is the clone `name`, so the name must not exceed 15 characters. Do not power a Windows clone off until its first boot has finished: stopped earlier, it keeps the host name, DNS and IP addresses of its source for good.
+
+~> `clone_from_server_id` records where the server came from — the API never reports it. Like the other create-only arguments, changing or removing it **replaces the server**: keep it, or add `lifecycle { ignore_changes = [clone_from_server_id] }`. An imported server has it null.
 
 ## Example Usage
 
@@ -74,6 +92,22 @@ resource "vcp_server" "with_app" {
 output "application_installations" {
   value = vcp_server.with_app.application_installations
 }
+
+# A clone of an existing server. Power the source off before the apply: only a
+# stopped server is cloned. The clone takes CPU, RAM and volumes from its
+# source, so name is the only other argument it accepts while it is created;
+# afterwards cpu, ram_mb and volumes can be added here and are changed in place.
+# For a Windows source the name is the host name of the clone and must not
+# exceed 15 characters.
+variable "source_server_id" {
+  description = "ID of the stopped server to clone."
+  type        = string
+}
+
+resource "vcp_server" "clone" {
+  name                 = "app-server-clone"
+  clone_from_server_id = var.source_server_id
+}
 ```
 
 <!-- schema generated by tfplugindocs -->
@@ -81,14 +115,7 @@ output "application_installations" {
 
 ### Required
 
-- `cpu` (Number) Number of CPU cores
-- `image_id` (String) OS image ID to use for the server. Changing this forces a new resource.
-- `location_id` (String) Location ID where the server will be created. Changing this forces a new resource.
 - `name` (String) Server name
-- `ram_mb` (Number) RAM size in megabytes
-- `volumes` (Attributes List) List of volumes. At least one volume with `name = "boot"` is required. Volume size must be a multiple of 10240 MB (10 GB).
-
-The `number` field is a unique identifier for each volume. It must be unique across all volumes and is used to track volume changes. (see [below for nested schema](#nestedatt--volumes))
 
 ### Optional
 
@@ -97,9 +124,17 @@ The `number` field is a unique identifier for each volume. It must be unique acr
 
 ~> Changing this forces a new resource. Conflicts with `applications_ids`: an order with `applications` does not apply `applications_ids`, so set one or the other. (see [below for nested schema](#nestedatt--applications))
 - `applications_ids` (Set of String) Set of application IDs to install on the server, without parameters. Only applied during creation. **Changing this forces a new resource.** Conflicts with `applications`, which also takes parameter values and a language model key; set one or the other.
+- `clone_from_server_id` (String) ID of a stopped server of the same project to clone instead of ordering a server from an image. A clone takes its specification from the source, so `name` is the only other argument it accepts while it is created. **Changing this forces a new resource.** See *Cloning an existing server* above for what the source must be and how a live clone restricts it.
+- `cpu` (Number) Number of CPU cores. Required when ordering a server; a clone takes it from its source and can be resized afterwards.
+- `image_id` (String) OS image ID to use for the server. Required when ordering a server; a clone (`clone_from_server_id`) carries the image of its source. Changing this forces a new resource.
 - `init_script` (String) Bash init script. It will run once on the first start. Only applied during creation. **Changing this forces a new resource.**
+- `location_id` (String) Location ID where the server will be created. Required when ordering a server; a clone (`clone_from_server_id`) is created in the location of its source. Changing this forces a new resource.
+- `ram_mb` (Number) RAM size in megabytes. Required when ordering a server; a clone takes it from its source and can be resized afterwards.
 - `ssh_key_ids` (Set of Number) Set of SSH key IDs to add to the server. SSH keys are only applied during server creation. **Changing this forces a new resource.**
 - `tags` (Set of String) Set of tags associated with the server. If attribute is omitted, all existing tags will be removed.
+- `volumes` (Attributes List) List of volumes. Required when ordering a server, with at least one volume named `boot`; a clone takes the volumes of its source, numbered by their order (0, 1, 2, ...). Volume size must be a multiple of 10240 MB (10 GB).
+
+The `number` field is a unique identifier for each volume. It must be unique across all volumes and is used to track volume changes. (see [below for nested schema](#nestedatt--volumes))
 
 ### Read-Only
 
@@ -110,6 +145,19 @@ The `number` field is a unique identifier for each volume. It must be unique acr
 - `login` (String, Sensitive) Server login username
 - `password` (String, Sensitive) Server password
 - `state` (String) Server state (New, Active, Busy, Blocked)
+
+<a id="nestedatt--applications"></a>
+### Nested Schema for `applications`
+
+Required:
+
+- `id` (String) Application ID from the `vcp_applications` data source. An application is listed once per server.
+
+Optional:
+
+- `issue_llm_key` (Boolean) Issue a platform language model key for the application and pass it, with the inference address, into the parameters the catalog marks with `llm_kind`. Accepted only for an application whose catalog entry has `llm_key_enabled`. Defaults to `false`.
+- `parameters` (Map of String, Sensitive) Parameter values by parameter name, as the catalog entry names them in `parameters`. Every `required` parameter without a `default` must be set; a name the application does not declare is refused.
+
 
 <a id="nestedatt--volumes"></a>
 ### Nested Schema for `volumes`
@@ -124,19 +172,6 @@ Read-Only:
 
 - `created` (String) Volume creation timestamp
 - `id` (Number) Volume ID from API (computed)
-
-
-<a id="nestedatt--applications"></a>
-### Nested Schema for `applications`
-
-Required:
-
-- `id` (String) Application ID from the `vcp_applications` data source. An application is listed once per server.
-
-Optional:
-
-- `issue_llm_key` (Boolean) Issue a platform language model key for the application and pass it, with the inference address, into the parameters the catalog marks with `llm_kind`. Accepted only for an application whose catalog entry has `llm_key_enabled`. Defaults to `false`.
-- `parameters` (Map of String, Sensitive) Parameter values by parameter name, as the catalog entry names them in `parameters`. Every `required` parameter without a `default` must be set; a name the application does not declare is refused.
 
 
 <a id="nestedatt--application_installations"></a>

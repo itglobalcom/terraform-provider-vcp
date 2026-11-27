@@ -8,8 +8,12 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
@@ -26,6 +30,7 @@ import (
 var _ resource.Resource = &ServerResource{}
 var _ resource.ResourceWithImportState = &ServerResource{}
 var _ resource.ResourceWithValidateConfig = &ServerResource{}
+var _ resource.ResourceWithModifyPlan = &ServerResource{}
 
 func NewServerResource() resource.Resource {
 	return &ServerResource{}
@@ -43,8 +48,30 @@ func (r *ServerResource) Metadata(ctx context.Context, req resource.MetadataRequ
 func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages a virtual server (VM) instance.\n\n" +
-			"**Note:** At least one volume with `name = \"boot\"` is required. " +
-			"Changing `location_id` or `image_id` will force recreation of the server.",
+			"**Note:** An ordered server needs at least one volume with `name = \"boot\"`. " +
+			"Changing `location_id` or `image_id` will force recreation of the server.\n\n" +
+			"### Cloning an existing server\n\n" +
+			"`clone_from_server_id` is the second way to bring a server into being: instead of ordering one " +
+			"from an image, the platform clones a server of the same project, disks and all. The clone takes " +
+			"CPU, RAM, volumes, networks, login and password from its source, gets new MAC and IP addresses, and " +
+			"is created in the location of the source; snapshots, the backup schedule, applications and tags " +
+			"are not carried over. `clone_from_server_id` and `name` are therefore the only arguments a clone " +
+			"accepts — declare anything else and the plan says so. Once the clone exists it is an ordinary " +
+			"server: add `cpu`, `ram_mb`, `volumes` and the rest to the same resource and the next apply " +
+			"changes them in place.\n\n" +
+			"~> **Power the source off before the apply.** The platform clones only a stopped server, and only " +
+			"on a location and an OS image that allow cloning; a clone of a clone is refused.\n\n" +
+			"~> **While a clone lives, its source is restricted:** the source cannot be deleted, rolled back to " +
+			"a snapshot taken before the clone, lose a volume it had when the clone was made, or be restored " +
+			"from a backup in place (restoring next to it works). Delete the clones first; a clone that " +
+			"refers to its source (`clone_from_server_id = vcp_server.<source>.id`) is destroyed before it " +
+			"by Terraform itself.\n\n" +
+			"~> **Windows clone:** its host name is the clone `name`, so the name must not exceed 15 " +
+			"characters. Do not power a Windows clone off until its first boot has finished: stopped earlier, " +
+			"it keeps the host name, DNS and IP addresses of its source for good.\n\n" +
+			"~> `clone_from_server_id` records where the server came from — the API never reports it. Like the " +
+			"other create-only arguments, changing or removing it **replaces the server**: keep it, or add " +
+			"`lifecycle { ignore_changes = [clone_from_server_id] }`. An imported server has it null.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -58,17 +85,36 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				MarkdownDescription: "Server name",
 				Required:            true,
 			},
-			"location_id": schema.StringAttribute{
-				MarkdownDescription: "Location ID where the server will be created. Changing this forces a new resource.",
-				Required:            true,
+			"clone_from_server_id": schema.StringAttribute{
+				MarkdownDescription: "ID of a stopped server of the same project to clone instead of ordering a " +
+					"server from an image. A clone takes its specification from the source, so `name` is the only " +
+					"other argument it accepts while it is created. **Changing this forces a new resource.** " +
+					"See *Cloning an existing server* above for what the source must be and how a live clone " +
+					"restricts it.",
+				Optional: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"image_id": schema.StringAttribute{
-				MarkdownDescription: "OS image ID to use for the server. Changing this forces a new resource.",
-				Required:            true,
+			"location_id": schema.StringAttribute{
+				MarkdownDescription: "Location ID where the server will be created. Required when ordering a server; " +
+					"a clone (`clone_from_server_id`) is created in the location of its source. " +
+					"Changing this forces a new resource.",
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"image_id": schema.StringAttribute{
+				MarkdownDescription: "OS image ID to use for the server. Required when ordering a server; " +
+					"a clone (`clone_from_server_id`) carries the image of its source. " +
+					"Changing this forces a new resource.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -95,12 +141,22 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				},
 			},
 			"cpu": schema.Int64Attribute{
-				MarkdownDescription: "Number of CPU cores",
-				Required:            true,
+				MarkdownDescription: "Number of CPU cores. Required when ordering a server; a clone takes it " +
+					"from its source and can be resized afterwards.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"ram_mb": schema.Int64Attribute{
-				MarkdownDescription: "RAM size in megabytes",
-				Required:            true,
+				MarkdownDescription: "RAM size in megabytes. Required when ordering a server; a clone takes it " +
+					"from its source and can be resized afterwards.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			// SSH Keys. Set, not List: order-insensitive to the API, and a List +
 			// RequiresReplace would plan a destructive server replacement on a
@@ -140,12 +196,15 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			},
 			// Volumes
 			"volumes": schema.ListNestedAttribute{
-				MarkdownDescription: "List of volumes. At least one volume with `name = \"boot\"` is required. " +
+				MarkdownDescription: "List of volumes. Required when ordering a server, with at least one volume " +
+					"named `boot`; a clone takes the volumes of its source, numbered by their order (0, 1, 2, ...). " +
 					"Volume size must be a multiple of 10240 MB (10 GB).\n\n" +
 					"The `number` field is a unique identifier for each volume. " +
 					"It must be unique across all volumes and is used to track volume changes.",
-				Required: true,
+				Optional: true,
+				Computed: true,
 				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
 					VolumesNumberChangeModifier(),
 				},
 				NestedObject: schema.NestedAttributeObject{
@@ -236,12 +295,21 @@ func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.Valida
 		return
 	}
 
-	// Validate Volumes
+	var volumes types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("volumes"), &volumes)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if data.CloneFromServerID.IsNull() {
+		validateOrderArguments(data, volumes, &resp.Diagnostics)
+	}
+
 	if err := r.validateUniqueVolumeNumbers(data.Volumes); err != nil {
 		resp.Diagnostics.AddError("Invalid Volume Configuration", err.Error())
 	}
 
-	if r.findBootVolume(data.Volumes) == nil {
+	if !volumes.IsNull() && r.findBootVolume(data.Volumes) == nil {
 		resp.Diagnostics.AddError("Missing Boot Volume",
 			"At least one volume with name=\"boot\" is required")
 	}
@@ -255,7 +323,94 @@ func (r *ServerResource) ValidateConfig(ctx context.Context, req resource.Valida
 	validateApplications(ctx, data, &resp.Diagnostics)
 }
 
+// validateOrderArguments refuses an order that leaves out an argument the
+// schema keeps Optional + Computed: a server ordered from an image cannot be
+// created without it.
+func validateOrderArguments(data ServerResourceModel, volumes types.List, diags *diag.Diagnostics) {
+	for _, arg := range []struct {
+		name     string
+		declared bool
+	}{
+		{"location_id", !data.LocationID.IsNull()},
+		{"image_id", !data.ImageID.IsNull()},
+		{"cpu", !data.CPU.IsNull()},
+		{"ram_mb", !data.RamMB.IsNull()},
+		{"volumes", !volumes.IsNull()},
+	} {
+		if arg.declared {
+			continue
+		}
+		diags.AddAttributeError(path.Root(arg.name), "Missing Attribute",
+			fmt.Sprintf("%s is needed to order a server. Set it, or set clone_from_server_id to create this "+
+				"server as a clone of an existing one, which takes its specification from the source.", arg.name))
+	}
+}
+
+// ModifyPlan refuses, at plan time, an order argument beside
+// clone_from_server_id — but only while the server is being created.
+//
+// The clone request carries a name and nothing else, so anything else in the
+// configuration would be accepted and then silently ignored. The check cannot
+// live in ValidateConfig, which never sees prior state: clone_from_server_id
+// stays in the configuration for the life of the server (removing it would
+// replace it), and a clone has to remain resizable like any other server.
+func (r *ServerResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Null plan = destroy; non-null state = the server already exists.
+	if req.Plan.Raw.IsNull() || !req.State.Raw.IsNull() {
+		return
+	}
+
+	var config ServerResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() || config.CloneFromServerID.IsNull() {
+		return
+	}
+
+	var volumes types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("volumes"), &volumes)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	for _, arg := range []struct {
+		name     string
+		declared bool
+	}{
+		{"location_id", !config.LocationID.IsNull()},
+		{"image_id", !config.ImageID.IsNull()},
+		{"cpu", !config.CPU.IsNull()},
+		{"ram_mb", !config.RamMB.IsNull()},
+		{"volumes", !volumes.IsNull()},
+		{"applications_ids", config.ApplicationsIDs != nil},
+		{"applications", !config.Applications.IsNull()},
+		{"init_script", !config.InitScript.IsNull()},
+		{"ssh_key_ids", config.SSHKeyIDs != nil},
+		{"affinity_group_id", !config.AffinityGroupID.IsNull()},
+		{"tags", !config.Tags.IsNull()},
+	} {
+		if !arg.declared {
+			continue
+		}
+		resp.Diagnostics.AddAttributeError(path.Root(arg.name), "Argument Not Accepted By A Clone",
+			fmt.Sprintf("A clone takes its whole specification from the server it is cloned from, so the platform "+
+				"has no way to apply %s while creating it — clone_from_server_id and name are the only arguments "+
+				"a clone accepts.\n\nRemove %s to create the clone. Once it exists it is an ordinary server: add "+
+				"%s back and the next apply changes it in place, or replaces the server where that argument "+
+				"requires it.", arg.name, arg.name, arg.name))
+	}
+}
+
 func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var cloneFrom types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("clone_from_server_id"), &cloneFrom)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !cloneFrom.IsNull() {
+		r.cloneServer(ctx, req, resp)
+		return
+	}
+
 	var data ServerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
@@ -395,6 +550,62 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	r.restoreAndAssignVolumeNumbers(&data.Volumes, nil, used)
 	data.Volumes = r.sortVolumesByPlanOrder(data.Volumes, planVolumeOrder)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// cloneServer creates the server as a clone of an existing one. The clone
+// request carries a name and nothing else — the rest of the specification is
+// the source's — so the plan is read attribute by attribute: volumes, cpu and
+// the other Optional + Computed arguments are unknown until the clone exists,
+// and an unknown list does not decode into the model's volume slice.
+//
+// The source is locked, not the clone: the platform serializes changes per
+// object, and the clone is read out of a source that must not be changing
+// while it is.
+func (r *ServerResource) cloneServer(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var name, sourceID types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("clone_from_server_id"), &sourceID)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	defer locks.Server(sourceID.ValueString())()
+
+	tflog.Info(ctx, "Cloning server", map[string]any{
+		"source_server_id": sourceID.ValueString(), "name": name.ValueString(),
+	})
+
+	server, err := r.client.CloneServerAndWait(ctx, sourceID.ValueString(), &entities.CloneServerRequest{
+		Name: name.ValueString(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Error Cloning Server",
+			fmt.Sprintf("Could not clone server %s to %q: %s\n\n"+
+				"If the message says the clone was created, the server exists on the platform without being "+
+				"recorded here — find it in the panel and either delete it or import it.",
+				sourceID.ValueString(), name.ValueString(), err.Error()))
+		return
+	}
+
+	tflog.Info(ctx, "Server cloned successfully", map[string]any{"id": server.ID})
+
+	data := ServerResourceModel{
+		CloneFromServerID: sourceID,
+		InitScript:        types.StringNull(),
+		Applications:      applicationsNull(),
+	}
+	r.mapServerToModel(ctx, server, &data)
+
+	// ssh_key_ids is create-only and not Computed: the plan holds null, and
+	// a value read from the API here would fail the apply as an inconsistent
+	// result.
+	data.SSHKeyIDs = nil
+
+	for i := range data.Volumes {
+		data.Volumes[i].Number = types.Int64Value(int64(i))
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

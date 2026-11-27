@@ -6,19 +6,20 @@ import (
 
 // ServerResourceModel describes the resource data model.
 type ServerResourceModel struct {
-	ID              types.String      `tfsdk:"id"`
-	Name            types.String      `tfsdk:"name"`
-	LocationID      types.String      `tfsdk:"location_id"`
-	ImageID         types.String      `tfsdk:"image_id"`
-	CPU             types.Int64       `tfsdk:"cpu"`
-	RamMB           types.Int64       `tfsdk:"ram_mb"`
-	SSHKeyIDs       []types.Int64     `tfsdk:"ssh_key_ids"`
-	InitScript      types.String      `tfsdk:"init_script"`
-	ApplicationsIDs []types.String    `tfsdk:"applications_ids"`
-	Applications    types.List        `tfsdk:"applications"`
-	Tags            types.Set         `tfsdk:"tags"`
-	AffinityGroupID types.String      `tfsdk:"affinity_group_id"`
-	Volumes         []VolumeAttrModel `tfsdk:"volumes"`
+	ID                types.String      `tfsdk:"id"`
+	Name              types.String      `tfsdk:"name"`
+	LocationID        types.String      `tfsdk:"location_id"`
+	ImageID           types.String      `tfsdk:"image_id"`
+	CPU               types.Int64       `tfsdk:"cpu"`
+	RamMB             types.Int64       `tfsdk:"ram_mb"`
+	SSHKeyIDs         []types.Int64     `tfsdk:"ssh_key_ids"`
+	InitScript        types.String      `tfsdk:"init_script"`
+	ApplicationsIDs   []types.String    `tfsdk:"applications_ids"`
+	Applications      types.List        `tfsdk:"applications"`
+	Tags              types.Set         `tfsdk:"tags"`
+	AffinityGroupID   types.String      `tfsdk:"affinity_group_id"`
+	CloneFromServerID types.String      `tfsdk:"clone_from_server_id"`
+	Volumes           []VolumeAttrModel `tfsdk:"volumes"`
 
 	// Computed attributes
 	State     types.String `tfsdk:"state"`
